@@ -14,7 +14,7 @@ def get_supply_interruptions(time_series, status_series):
     interruptions = []
     in_interrupt = False
     start_time = None
-    
+
     for i in range(len(status_series)):
         if not status_series.iloc[i] and not in_interrupt:
             # Transition: In supply -> Out of supply
@@ -53,12 +53,13 @@ def format_timedelta(td):
     seconds = total_seconds % 60
     return f"{hours:02}:{minutes:02}:{seconds:02}"
 
-def highlight_row(row):
+def highlight_row_with_index(row, raw_durations):
     """
-    Checks the hidden 'Raw Duration' column and returns a list of CSS styles.
-    If the raw duration is 3 hours or more, the entire row is highlighted yellow.
+    Look up the raw duration for the current row (by index) from the provided Series.
+    If the duration is 3 hours or more, return a list of CSS styles to highlight the row yellow.
     """
-    raw_dur = row['Raw Duration']
+    idx = row.name
+    raw_dur = raw_durations.loc[idx]
     if pd.notnull(raw_dur) and isinstance(raw_dur, timedelta) and raw_dur.total_seconds() >= 3 * 3600:
         return ['background-color: yellow'] * len(row)
     else:
@@ -76,7 +77,7 @@ def main():
     pressure_file = st.file_uploader("Upload Pressure Data CSV", type=["csv"])
     heights_file = st.file_uploader("Upload Property Heights CSV", type=["csv"])
     logger_height = st.number_input("Enter the height of the pressure logger (in meters):", min_value=0.0, value=100.0)
-    
+
     if pressure_file is not None and heights_file is not None:
         try:
             # Read and process the pressure CSV file.
@@ -88,7 +89,7 @@ def main():
         except Exception as e:
             st.error(f"Error processing pressure data: {e}")
             return
-        
+
         try:
             # Read the property heights CSV file and ensure values are numeric.
             heights_df = pd.read_csv(heights_file, header=None, dtype={0: float})
@@ -100,20 +101,20 @@ def main():
         # Compute the Effective Supply Head for each timestamp.
         # Formula: logger_height + (pressure - 3)
         pressure_df['Effective_Supply_Head'] = logger_height + (pressure_df[pressure_col] - 3)
-        
+
         # Group properties by height and count how many properties have each height.
         grouped = heights_df.groupby('Property_Height').size().reset_index(name='Count')
-        
+
         # Prepare a list to store table rows.
         result_rows = []
-        
+
         for _, group_row in grouped.iterrows():
             property_height = group_row['Property_Height']
             count = group_row['Count']
             # Determine supply status for this property height over time.
             supply_status = pressure_df['Effective_Supply_Head'] > property_height
             interruptions = get_supply_interruptions(pressure_df[date_col], supply_status)
-            
+
             if not interruptions:
                 result_rows.append({
                     'Property Height (m)': property_height,
@@ -134,14 +135,17 @@ def main():
                         'Duration': formatted_duration,
                         'Raw Duration': intr['duration']  # Hidden column for highlighting
                     })
-        
+
         # Convert the results into a DataFrame.
         results_df = pd.DataFrame(result_rows)
-        
-        # Apply row-wise styling and hide the 'Raw Duration' column.
-        # Note: Using hide_columns_ instead of hide_columns.
-        styled_df = results_df.style.apply(highlight_row, axis=1).hide_columns_(["Raw Duration"])
-        
+
+        # Save the raw durations and then drop the "Raw Duration" column from the displayed DataFrame.
+        raw_durations = results_df['Raw Duration']
+        results_df_display = results_df.drop(columns=["Raw Duration"])
+
+        # Apply row-wise styling using the helper function that references raw_durations.
+        styled_df = results_df_display.style.apply(lambda row: highlight_row_with_index(row, raw_durations), axis=1)
+
         st.markdown("### Supply Interruption Results Table:")
         # Render the styled table as HTML.
         st.markdown(styled_df.to_html(), unsafe_allow_html=True)
