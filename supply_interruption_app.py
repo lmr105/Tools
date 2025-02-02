@@ -139,10 +139,11 @@ def main():
         results_df = pd.DataFrame(result_rows)
         
         # Apply row-wise styling and hide the 'Raw Duration' column.
-        styled_df = results_df.style.apply(highlight_row, axis=1).hide_columns(['Raw Duration'])
+        # Note: Using hide_columns_ instead of hide_columns.
+        styled_df = results_df.style.apply(highlight_row, axis=1).hide_columns_(["Raw Duration"])
         
         st.markdown("### Supply Interruption Results Table:")
-        # Use st.markdown with unsafe_allow_html=True to display the styled HTML table.
+        # Render the styled table as HTML.
         st.markdown(styled_df.to_html(), unsafe_allow_html=True)
 
 if __name__ == "__main__":
