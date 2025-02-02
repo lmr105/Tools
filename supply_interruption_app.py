@@ -43,18 +43,26 @@ def get_supply_interruptions(time_series, status_series):
 
     return interruptions
 
+def format_timedelta(td):
+    """
+    Convert a timedelta object to a string in HH:MM:SS format.
+    """
+    total_seconds = int(td.total_seconds())
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    seconds = total_seconds % 60
+    return f"{hours:02}:{minutes:02}:{seconds:02}"
+
 def highlight_row(row):
     """
-    Returns a list of CSS styles for the row.
-    Highlights the entire row with a yellow background if the 'Duration'
-    is a timedelta object and is 3 hours or more.
+    Checks the hidden 'Raw Duration' column and returns a list of CSS styles.
+    If the raw duration is 3 hours or more, the entire row is highlighted yellow.
     """
-    dur = row['Duration']
-    # Check if duration is a timedelta; if the cell is an empty string, do nothing.
-    if isinstance(dur, timedelta):
-        if dur.total_seconds() >= 3 * 3600:
-            return ['background-color: yellow'] * len(row)
-    return [''] * len(row)
+    raw_dur = row['Raw Duration']
+    if pd.notnull(raw_dur) and isinstance(raw_dur, timedelta) and raw_dur.total_seconds() >= 3 * 3600:
+        return ['background-color: yellow'] * len(row)
+    else:
+        return [''] * len(row)
 
 def main():
     st.title("Water Supply Interruption Calculator")
@@ -99,9 +107,9 @@ def main():
         # Prepare a list to store table rows.
         result_rows = []
         
-        for _, row in grouped.iterrows():
-            property_height = row['Property_Height']
-            count = row['Count']
+        for _, group_row in grouped.iterrows():
+            property_height = group_row['Property_Height']
+            count = group_row['Count']
             # Determine supply status for this property height over time.
             supply_status = pressure_df['Effective_Supply_Head'] > property_height
             interruptions = get_supply_interruptions(pressure_df[date_col], supply_status)
@@ -112,26 +120,30 @@ def main():
                     'Count': count,
                     'Lost Supply': "In supply all times",
                     'Regained Supply': "",
-                    'Duration': ""
+                    'Duration': "",
+                    'Raw Duration': None  # Hidden column for raw timedelta
                 })
             else:
                 for intr in interruptions:
+                    formatted_duration = format_timedelta(intr['duration'])
                     result_rows.append({
                         'Property Height (m)': property_height,
                         'Count': count,
                         'Lost Supply': intr['lost_time'],
                         'Regained Supply': intr['regained_time'],
-                        'Duration': intr['duration']
+                        'Duration': formatted_duration,
+                        'Raw Duration': intr['duration']  # Hidden column for highlighting
                     })
         
         # Convert the results into a DataFrame.
         results_df = pd.DataFrame(result_rows)
         
-        # Apply row-wise styling: highlight rows where Duration is 3 hours or more.
-        styled_df = results_df.style.apply(highlight_row, axis=1)
+        # Apply row-wise styling and hide the 'Raw Duration' column.
+        styled_df = results_df.style.apply(highlight_row, axis=1).hide_columns(['Raw Duration'])
         
         st.markdown("### Supply Interruption Results Table:")
-        st.dataframe(styled_df, use_container_width=True)
+        # Use st.markdown with unsafe_allow_html=True to display the styled HTML table.
+        st.markdown(styled_df.to_html(), unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
