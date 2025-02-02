@@ -43,6 +43,19 @@ def get_supply_interruptions(time_series, status_series):
 
     return interruptions
 
+def highlight_row(row):
+    """
+    Returns a list of CSS styles for the row.
+    Highlights the entire row with a yellow background if the 'Duration'
+    is a timedelta object and is 3 hours or more.
+    """
+    dur = row['Duration']
+    # Check if duration is a timedelta; if the cell is an empty string, do nothing.
+    if isinstance(dur, timedelta):
+        if dur.total_seconds() >= 3 * 3600:
+            return ['background-color: yellow'] * len(row)
+    return [''] * len(row)
+
 def main():
     st.title("Water Supply Interruption Calculator")
     st.markdown("""
@@ -111,11 +124,14 @@ def main():
                         'Duration': intr['duration']
                     })
         
-        # Convert the results into a DataFrame for display.
+        # Convert the results into a DataFrame.
         results_df = pd.DataFrame(result_rows)
         
+        # Apply row-wise styling: highlight rows where Duration is 3 hours or more.
+        styled_df = results_df.style.apply(highlight_row, axis=1)
+        
         st.markdown("### Supply Interruption Results Table:")
-        st.dataframe(results_df)
+        st.dataframe(styled_df, use_container_width=True)
 
 if __name__ == "__main__":
     main()
