@@ -66,7 +66,7 @@ def highlight_row_with_index(row, raw_durations):
         return [''] * len(row)
 
 def main():
-    st.title("Supply Interruption Tool")
+    st.title("Water Supply Interruption Calculator")
     st.markdown("""
     **Instructions:**
     - Upload the **Pressure Data CSV** (with two columns: date/time and pressure in meters head).
@@ -119,7 +119,7 @@ def main():
                 result_rows.append({
                     'Property Height (m)': property_height,
                     'Count': count,
-                    'Lost Supply': "In supply at all times",
+                    'Lost Supply': "In supply all times",
                     'Regained Supply': "",
                     'Duration': "",
                     'Raw Duration': None  # Hidden column for raw timedelta
@@ -139,7 +139,7 @@ def main():
         # Convert the results into a DataFrame.
         results_df = pd.DataFrame(result_rows)
 
-        # Save the raw durations and then drop the "Raw Duration" column from the displayed DataFrame.
+        # Save the raw durations separately and drop the column from the displayed DataFrame.
         raw_durations = results_df['Raw Duration']
         results_df_display = results_df.drop(columns=["Raw Duration"])
 
@@ -148,7 +148,25 @@ def main():
 
         st.markdown("### Supply Interruption Results Table:")
         # Render the styled table as HTML.
-        st.markdown(styled_df.to_html(), unsafe_allow_html=True)
+        html_table = styled_df.to_html()
+        st.markdown(html_table, unsafe_allow_html=True)
+
+        # Add a download button for the styled table as an HTML file.
+        st.download_button(
+            label="Download Styled Table as HTML",
+            data=html_table,
+            file_name="styled_table.html",
+            mime="text/html"
+        )
+
+        # Optionally, you could also add a CSV download button for the underlying data (without styling).
+        csv_data = results_df_display.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="Download Table as CSV",
+            data=csv_data,
+            file_name="results.csv",
+            mime="text/csv"
+        )
 
 if __name__ == "__main__":
     main()
