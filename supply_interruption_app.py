@@ -66,7 +66,7 @@ def highlight_row_with_index(row, raw_durations):
         return [''] * len(row)
 
 def main():
-    st.title("Water Supply Interruption Calculator")
+    st.title("Supply Interruption Tool")
     st.markdown("""
     **Instructions:**
     - Upload the **Pressure Data CSV** (with two columns: date/time and pressure in meters head).
@@ -119,7 +119,7 @@ def main():
                 result_rows.append({
                     'Property Height (m)': property_height,
                     'Count': count,
-                    'Lost Supply': "In supply all times",
+                    'Lost Supply': "In supply at all times",
                     'Regained Supply': "",
                     'Duration': "",
                     'Raw Duration': None  # Hidden column for raw timedelta
