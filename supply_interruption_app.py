@@ -73,7 +73,7 @@ def main():
     if not password:
         st.info("Please enter the password to continue.")
         st.stop()
-    elif password != "Doesdimdwrdafi":  # Replace with your chosen password
+    elif password != "123":  # Replace with your chosen password
         st.error("Incorrect password")
         st.stop()
     # --- End Password Protection ---
