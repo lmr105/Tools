@@ -68,16 +68,6 @@ def highlight_row_with_index(row, raw_durations):
 def main():
     st.title("Water Supply Interruption Calculator")
 
-    # --- Password Protection ---
-    password = st.text_input("Enter password to access the app", type="password")
-    if not password:
-        st.info("Please enter the password to continue.")
-        st.stop()
-    elif password != "123":  # Replace with your chosen password
-        st.error("Incorrect password")
-        st.stop()
-    # --- End Password Protection ---
-
     st.markdown("""
     **Instructions:**
     - Upload the **Pressure Data CSV** (with two columns: date/time and pressure in meters head).
