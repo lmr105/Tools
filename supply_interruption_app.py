@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import io
 from datetime import datetime, timedelta
+from xlsxwriter.utility import xl_col_to_name
 
 def get_supply_interruptions(time_series, status_series):
     """
@@ -26,8 +27,8 @@ def get_supply_interruptions(time_series, status_series):
             end_time = time_series.iloc[i]
             duration = end_time - start_time
             interruptions.append({
-                'lost_time': start_time, 
-                'regained_time': end_time, 
+                'lost_time': start_time,
+                'regained_time': end_time,
                 'duration': duration
             })
             in_interrupt = False
@@ -37,11 +38,10 @@ def get_supply_interruptions(time_series, status_series):
         end_time = time_series.iloc[-1]
         duration = end_time - start_time
         interruptions.append({
-            'lost_time': start_time, 
-            'regained_time': end_time, 
+            'lost_time': start_time,
+            'regained_time': end_time,
             'duration': duration
         })
-
     return interruptions
 
 def format_timedelta(td):
@@ -80,47 +80,35 @@ def generate_excel_file(results_df):
     # Drop the original "Raw Duration" column for display.
     df_excel = df_excel.drop(columns=["Raw Duration"])
 
-    # Use BytesIO to build the Excel file in memory.
+    # Build the Excel file in memory.
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df_excel.to_excel(writer, index=False, sheet_name='Results')
         workbook = writer.book
         worksheet = writer.sheets['Results']
-        
-        # Determine the number of rows (including header) and columns.
+
+        # Determine number of rows (including header) and columns.
         num_rows = df_excel.shape[0] + 1  # header + data rows
         num_cols = df_excel.shape[1]
-        
-        # Find the column index for "Raw Duration (seconds)". In Excel, columns are zero-indexed.
+
+        # Get the column index for "Raw Duration (seconds)".
         raw_col_index = df_excel.columns.get_loc("Raw Duration (seconds)")
         # Hide the "Raw Duration (seconds)" column.
         worksheet.set_column(raw_col_index, raw_col_index, None, None, {'hidden': True})
-        
+
         # Create a highlight format (yellow background).
         highlight_format = workbook.add_format({'bg_color': '#FFFF00'})
-        
-        # Apply conditional formatting.
-        # We'll apply formatting to all cells in the visible range (all columns except the hidden one).
-        # The condition is that the corresponding "Raw Duration (seconds)" cell is >= 10800.
-        # Convert raw_col_index to Excel column letter. Here we assume it's the 6th column (F) if present,
-        # but we'll derive the letter programmatically.
-        # For simplicity, we assume that the "Raw Duration (seconds)" column is at a fixed index.
-        # Alternatively, you can use xlsxwriter.utility.xl_col_to_name(raw_col_index)
-        from xlsxwriter.utility import xl_col_to_name
+
+        # Apply conditional formatting over the visible range.
         raw_col_letter = xl_col_to_name(raw_col_index)
-        
-        # Define the range to apply the formatting.
-        # We'll apply to columns A through the last visible column (all columns in df_excel except the hidden one).
-        # To keep it simple, apply conditional formatting to the entire data range (starting from row 2).
         visible_range = f"A2:{xl_col_to_name(num_cols - 1)}{num_rows}"
-        # The formula refers to the hidden cell in the same row, e.g. =$F2>=10800
+        # Formula: Check if the hidden cell in the row (e.g. $F2) is >= 10800 seconds.
         formula = f"=${raw_col_letter}2>=10800"
         worksheet.conditional_format(visible_range, {
             'type': 'formula',
             'criteria': formula,
             'format': highlight_format
         })
-        writer.save()
     return output.getvalue()
 
 def main():
@@ -149,7 +137,7 @@ def main():
 
     if pressure_file is not None and heights_file is not None:
         try:
-            # Read and process the pressure CSV file.
+            # Process the pressure CSV.
             pressure_df = pd.read_csv(pressure_file)
             date_col = pressure_df.columns[0]
             pressure_col = pressure_df.columns[1]
@@ -160,27 +148,21 @@ def main():
             return
 
         try:
-            # Read the property heights CSV file and ensure values are numeric.
+            # Process the property heights CSV.
             heights_df = pd.read_csv(heights_file, header=None, dtype={0: float})
             heights_df.columns = ['Property_Height']
         except Exception as e:
             st.error(f"Error processing property heights: {e}")
             return
 
-        # Compute the Effective Supply Head for each timestamp.
-        # Formula: logger_height + (pressure - 3)
+        # Calculate Effective Supply Head.
         pressure_df['Effective_Supply_Head'] = logger_height + (pressure_df[pressure_col] - 3)
-
-        # Group properties by height and count how many properties have each height.
         grouped = heights_df.groupby('Property_Height').size().reset_index(name='Count')
 
-        # Prepare a list to store table rows.
         result_rows = []
-
         for _, group_row in grouped.iterrows():
             property_height = group_row['Property_Height']
             count = group_row['Count']
-            # Determine supply status for this property height over time.
             supply_status = pressure_df['Effective_Supply_Head'] > property_height
             interruptions = get_supply_interruptions(pressure_df[date_col], supply_status)
 
@@ -191,7 +173,7 @@ def main():
                     'Lost Supply': "In supply all times",
                     'Regained Supply': "",
                     'Duration': "",
-                    'Raw Duration': None  # For internal use
+                    'Raw Duration': None
                 })
             else:
                 for intr in interruptions:
@@ -202,14 +184,10 @@ def main():
                         'Lost Supply': intr['lost_time'],
                         'Regained Supply': intr['regained_time'],
                         'Duration': formatted_duration,
-                        'Raw Duration': intr['duration']  # For internal use
+                        'Raw Duration': intr['duration']
                     })
 
-        # Convert the results into a DataFrame.
         results_df = pd.DataFrame(result_rows)
-
-        # Display the styled table (HTML with conditional formatting via CSS)
-        # For display purposes we drop the raw column.
         raw_durations = results_df['Raw Duration']
         results_df_display = results_df.drop(columns=["Raw Duration"])
         styled_df = results_df_display.style.apply(lambda row: highlight_row_with_index(row, raw_durations), axis=1)
@@ -218,8 +196,6 @@ def main():
         st.markdown(html_table, unsafe_allow_html=True)
 
         # --- Download Buttons ---
-
-        # Download as HTML (with styling)
         st.download_button(
             label="Download Styled Table as HTML",
             data=html_table,
@@ -227,7 +203,6 @@ def main():
             mime="text/html"
         )
 
-        # Download as CSV (data only, no styling)
         csv_data = results_df_display.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="Download Table as CSV",
@@ -236,7 +211,6 @@ def main():
             mime="text/csv"
         )
 
-        # Download as Excel (.xlsx) with conditional formatting
         excel_data = generate_excel_file(results_df)
         st.download_button(
             label="Download Table as Excel (.xlsx)",
