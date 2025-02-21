@@ -19,11 +19,9 @@ def get_supply_interruptions(time_series, status_series):
 
     for i in range(len(status_series)):
         if not status_series.iloc[i] and not in_interrupt:
-            # Transition: In supply -> Out of supply
             in_interrupt = True
             start_time = time_series.iloc[i]
         elif status_series.iloc[i] and in_interrupt:
-            # Transition: Out of supply -> In supply
             end_time = time_series.iloc[i]
             duration = end_time - start_time
             interruptions.append({
@@ -33,7 +31,6 @@ def get_supply_interruptions(time_series, status_series):
             })
             in_interrupt = False
 
-    # If still out of supply at the end, record until the final time.
     if in_interrupt:
         end_time = time_series.iloc[-1]
         duration = end_time - start_time
@@ -72,37 +69,27 @@ def generate_excel_file(results_df):
     The Excel file will include a hidden column with the raw duration in seconds,
     and rows will be highlighted if that value is 10800 seconds (3 hours) or more.
     """
-    # Create a copy and add a column for raw duration in seconds.
     df_excel = results_df.copy()
     df_excel['Raw Duration (seconds)'] = df_excel['Raw Duration'].apply(
         lambda x: x.total_seconds() if pd.notnull(x) else None
     )
-    # Drop the original "Raw Duration" column for display.
     df_excel = df_excel.drop(columns=["Raw Duration"])
 
-    # Build the Excel file in memory.
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df_excel.to_excel(writer, index=False, sheet_name='Results')
         workbook = writer.book
         worksheet = writer.sheets['Results']
 
-        # Determine number of rows (including header) and columns.
         num_rows = df_excel.shape[0] + 1  # header + data rows
         num_cols = df_excel.shape[1]
 
-        # Get the column index for "Raw Duration (seconds)".
         raw_col_index = df_excel.columns.get_loc("Raw Duration (seconds)")
-        # Hide the "Raw Duration (seconds)" column.
         worksheet.set_column(raw_col_index, raw_col_index, None, None, {'hidden': True})
 
-        # Create a highlight format (yellow background).
         highlight_format = workbook.add_format({'bg_color': '#FFFF00'})
-
-        # Apply conditional formatting over the visible range.
         raw_col_letter = xl_col_to_name(raw_col_index)
         visible_range = f"A2:{xl_col_to_name(num_cols - 1)}{num_rows}"
-        # Formula: Check if the hidden cell in the row (e.g. $F2) is >= 10800 seconds.
         formula = f"=${raw_col_letter}2>=10800"
         worksheet.conditional_format(visible_range, {
             'type': 'formula',
@@ -137,7 +124,6 @@ def main():
 
     if pressure_file is not None and heights_file is not None:
         try:
-            # Process the pressure CSV.
             pressure_df = pd.read_csv(pressure_file)
             date_col = pressure_df.columns[0]
             pressure_col = pressure_df.columns[1]
@@ -148,14 +134,12 @@ def main():
             return
 
         try:
-            # Process the property heights CSV.
             heights_df = pd.read_csv(heights_file, header=None, dtype={0: float})
             heights_df.columns = ['Property_Height']
         except Exception as e:
             st.error(f"Error processing property heights: {e}")
             return
 
-        # Calculate Effective Supply Head.
         pressure_df['Effective_Supply_Head'] = logger_height + (pressure_df[pressure_col] - 3)
         grouped = heights_df.groupby('Property_Height').size().reset_index(name='Count')
 
@@ -173,18 +157,27 @@ def main():
                     'Lost Supply': "In supply all times",
                     'Regained Supply': "",
                     'Duration': "",
-                    'Raw Duration': None
+                    'Restoration Duration': "",
+                    'Raw Duration': None  # For internal use
                 })
             else:
-                for intr in interruptions:
+                # For each interruption, compute outage duration.
+                # Also, if there are successive outages, compute restoration duration.
+                for i, intr in enumerate(interruptions):
                     formatted_duration = format_timedelta(intr['duration'])
+                    if i > 0:
+                        restoration_td = intr['lost_time'] - interruptions[i-1]['regained_time']
+                        formatted_restoration = format_timedelta(restoration_td)
+                    else:
+                        formatted_restoration = ""
                     result_rows.append({
                         'Property Height (m)': property_height,
                         'Count': count,
                         'Lost Supply': intr['lost_time'],
                         'Regained Supply': intr['regained_time'],
                         'Duration': formatted_duration,
-                        'Raw Duration': intr['duration']
+                        'Restoration Duration': formatted_restoration,
+                        'Raw Duration': intr['duration']  # For internal use (for highlighting)
                     })
 
         results_df = pd.DataFrame(result_rows)
