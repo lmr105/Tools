@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import io
 from datetime import datetime, timedelta
 
 def get_supply_interruptions(time_series, status_series):
@@ -31,7 +32,7 @@ def get_supply_interruptions(time_series, status_series):
             })
             in_interrupt = False
 
-    # If still out of supply at the end of the series, record until the final time.
+    # If still out of supply at the end, record until the final time.
     if in_interrupt:
         end_time = time_series.iloc[-1]
         duration = end_time - start_time
@@ -65,8 +66,75 @@ def highlight_row_with_index(row, raw_durations):
     else:
         return [''] * len(row)
 
+def generate_excel_file(results_df):
+    """
+    Generate an Excel file in memory with conditional formatting.
+    The Excel file will include a hidden column with the raw duration in seconds,
+    and rows will be highlighted if that value is 10800 seconds (3 hours) or more.
+    """
+    # Create a copy and add a column for raw duration in seconds.
+    df_excel = results_df.copy()
+    df_excel['Raw Duration (seconds)'] = df_excel['Raw Duration'].apply(
+        lambda x: x.total_seconds() if pd.notnull(x) else None
+    )
+    # Drop the original "Raw Duration" column for display.
+    df_excel = df_excel.drop(columns=["Raw Duration"])
+
+    # Use BytesIO to build the Excel file in memory.
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df_excel.to_excel(writer, index=False, sheet_name='Results')
+        workbook = writer.book
+        worksheet = writer.sheets['Results']
+        
+        # Determine the number of rows (including header) and columns.
+        num_rows = df_excel.shape[0] + 1  # header + data rows
+        num_cols = df_excel.shape[1]
+        
+        # Find the column index for "Raw Duration (seconds)". In Excel, columns are zero-indexed.
+        raw_col_index = df_excel.columns.get_loc("Raw Duration (seconds)")
+        # Hide the "Raw Duration (seconds)" column.
+        worksheet.set_column(raw_col_index, raw_col_index, None, None, {'hidden': True})
+        
+        # Create a highlight format (yellow background).
+        highlight_format = workbook.add_format({'bg_color': '#FFFF00'})
+        
+        # Apply conditional formatting.
+        # We'll apply formatting to all cells in the visible range (all columns except the hidden one).
+        # The condition is that the corresponding "Raw Duration (seconds)" cell is >= 10800.
+        # Convert raw_col_index to Excel column letter. Here we assume it's the 6th column (F) if present,
+        # but we'll derive the letter programmatically.
+        # For simplicity, we assume that the "Raw Duration (seconds)" column is at a fixed index.
+        # Alternatively, you can use xlsxwriter.utility.xl_col_to_name(raw_col_index)
+        from xlsxwriter.utility import xl_col_to_name
+        raw_col_letter = xl_col_to_name(raw_col_index)
+        
+        # Define the range to apply the formatting.
+        # We'll apply to columns A through the last visible column (all columns in df_excel except the hidden one).
+        # To keep it simple, apply conditional formatting to the entire data range (starting from row 2).
+        visible_range = f"A2:{xl_col_to_name(num_cols - 1)}{num_rows}"
+        # The formula refers to the hidden cell in the same row, e.g. =$F2>=10800
+        formula = f"=${raw_col_letter}2>=10800"
+        worksheet.conditional_format(visible_range, {
+            'type': 'formula',
+            'criteria': formula,
+            'format': highlight_format
+        })
+        writer.save()
+    return output.getvalue()
+
 def main():
     st.title("Water Supply Interruption Calculator")
+
+    # --- Password Protection ---
+    password = st.text_input("Enter password to access the app", type="password")
+    if not password:
+        st.info("Please enter the password to continue.")
+        st.stop()
+    elif password != "mysecretpassword":  # Replace with your chosen password
+        st.error("Incorrect password")
+        st.stop()
+    # --- End Password Protection ---
 
     st.markdown("""
     **Instructions:**
@@ -123,7 +191,7 @@ def main():
                     'Lost Supply': "In supply all times",
                     'Regained Supply': "",
                     'Duration': "",
-                    'Raw Duration': None  # Hidden column for raw timedelta
+                    'Raw Duration': None  # For internal use
                 })
             else:
                 for intr in interruptions:
@@ -134,25 +202,24 @@ def main():
                         'Lost Supply': intr['lost_time'],
                         'Regained Supply': intr['regained_time'],
                         'Duration': formatted_duration,
-                        'Raw Duration': intr['duration']  # Hidden column for highlighting
+                        'Raw Duration': intr['duration']  # For internal use
                     })
 
         # Convert the results into a DataFrame.
         results_df = pd.DataFrame(result_rows)
 
-        # Save the raw durations separately and drop the column from the displayed DataFrame.
+        # Display the styled table (HTML with conditional formatting via CSS)
+        # For display purposes we drop the raw column.
         raw_durations = results_df['Raw Duration']
         results_df_display = results_df.drop(columns=["Raw Duration"])
-
-        # Apply row-wise styling using the helper function that references raw_durations.
         styled_df = results_df_display.style.apply(lambda row: highlight_row_with_index(row, raw_durations), axis=1)
-
         st.markdown("### Supply Interruption Results Table:")
-        # Render the styled table as HTML.
         html_table = styled_df.to_html()
         st.markdown(html_table, unsafe_allow_html=True)
 
-        # Add a download button for the styled table as an HTML file.
+        # --- Download Buttons ---
+
+        # Download as HTML (with styling)
         st.download_button(
             label="Download Styled Table as HTML",
             data=html_table,
@@ -160,13 +227,22 @@ def main():
             mime="text/html"
         )
 
-        # Optionally, add a CSV download button for the underlying data (without styling).
+        # Download as CSV (data only, no styling)
         csv_data = results_df_display.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="Download Table as CSV",
             data=csv_data,
             file_name="results.csv",
             mime="text/csv"
+        )
+
+        # Download as Excel (.xlsx) with conditional formatting
+        excel_data = generate_excel_file(results_df)
+        st.download_button(
+            label="Download Table as Excel (.xlsx)",
+            data=excel_data,
+            file_name="results.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
 if __name__ == "__main__":
