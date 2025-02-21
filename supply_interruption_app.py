@@ -42,7 +42,7 @@ def get_supply_interruptions(time_series, status_series):
     return interruptions
 
 def format_timedelta(td):
-    """Convert a timedelta to HH:MM:SS string."""
+    """Convert a timedelta to an HH:MM:SS string."""
     total_seconds = int(td.total_seconds())
     hours = total_seconds // 3600
     minutes = (total_seconds % 3600) // 60
@@ -102,7 +102,6 @@ def generate_processed_excel_file(processed_df):
     Columns: Property Height (m), Lost Supply, Regained Supply, Duration (formatted as HH:MM:SS).
     """
     df_excel = processed_df.copy()
-    # Format the Duration column
     df_excel['Duration'] = df_excel['Duration'].apply(lambda x: format_timedelta(x) if pd.notnull(x) else "")
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -121,11 +120,9 @@ def process_outages(result_rows):
     from collections import defaultdict
     groups = defaultdict(list)
     for row in result_rows:
-        # Exclude rows where there was no outage.
         if row['Lost Supply'] != "In supply all times":
             groups[row['Property Height (m)']].append(row)
     for height, events in groups.items():
-        # Sort events by Lost Supply time.
         events_sorted = sorted(events, key=lambda x: x['Lost Supply'])
         current_event = None
         for e in events_sorted:
@@ -133,16 +130,14 @@ def process_outages(result_rows):
                 current_event = {
                     "Lost Supply": e["Lost Supply"],
                     "Regained Supply": e["Regained Supply"],
-                    "Cumulative Duration": e["Raw Duration"]  # a timedelta
+                    "Cumulative Duration": e["Raw Duration"]
                 }
             else:
                 restoration_duration = e["Lost Supply"] - current_event["Regained Supply"]
                 if restoration_duration < timedelta(hours=1):
-                    # Combine events: extend the outage and add the gap plus new outage.
                     current_event["Regained Supply"] = e["Regained Supply"]
                     current_event["Cumulative Duration"] += restoration_duration + e["Raw Duration"]
                 else:
-                    # Restoration period is long enough; finish current combined outage.
                     if current_event["Cumulative Duration"] >= timedelta(hours=3):
                         processed.append({
                             "Property Height (m)": height,
@@ -162,7 +157,6 @@ def process_outages(result_rows):
                 "Regained Supply": current_event["Regained Supply"],
                 "Duration": current_event["Cumulative Duration"]
             })
-    # Sort by property height from highest to lowest.
     processed_sorted = sorted(processed, key=lambda x: x["Property Height (m)"], reverse=True)
     return processed_sorted
 
@@ -174,7 +168,7 @@ def main():
     if not password:
         st.info("Please enter the password to continue.")
         st.stop()
-    elif password != "123":  # Replace with your chosen password
+    elif password != "mysecretpassword":  # Replace with your chosen password
         st.error("Incorrect password")
         st.stop()
     # --- End Password Protection ---
@@ -208,16 +202,21 @@ def main():
             st.error(f"Error processing property heights: {e}")
             return
 
+        # Compute effective supply head for properties above the logger.
         pressure_df['Effective_Supply_Head'] = logger_height + (pressure_df[pressure_col] - 3)
         grouped = heights_df.groupby('Property_Height').size().reset_index(name='Count')
 
         result_rows = []
-        # Build raw outage events.
         for _, group_row in grouped.iterrows():
             property_height = group_row['Property_Height']
             count = group_row['Count']
-            supply_status = pressure_df['Effective_Supply_Head'] > property_height
+            # For properties at or below the logger height, use raw pressure > 0.
+            if property_height <= logger_height:
+                supply_status = pressure_df[pressure_col] > 0
+            else:
+                supply_status = pressure_df['Effective_Supply_Head'] > property_height
             interruptions = get_supply_interruptions(pressure_df[date_col], supply_status)
+
             if not interruptions:
                 result_rows.append({
                     'Property Height (m)': property_height,
@@ -279,10 +278,7 @@ def main():
         processed_events = process_outages(result_rows)
         if processed_events:
             processed_df = pd.DataFrame(processed_events)
-            # processed_df contains: Property Height (m), Lost Supply, Regained Supply, Duration (timedelta)
-            # Sort by property height descending.
             processed_df = processed_df.sort_values(by="Property Height (m)", ascending=False)
-            # For display, format Duration as HH:MM:SS.
             processed_df_display = processed_df.copy()
             processed_df_display['Duration'] = processed_df_display['Duration'].apply(lambda x: format_timedelta(x))
             st.markdown("### Processed Outages (Properties Truly Out of Supply)")
