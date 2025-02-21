@@ -7,11 +7,11 @@ from xlsxwriter.utility import xl_col_to_name
 def get_supply_interruptions(time_series, status_series):
     """
     Given a time_series (Pandas Series of datetime objects) and a boolean status_series 
-    (True if in supply, False if out of supply), this function returns a list of dictionaries,
-    each containing:
-      - 'lost_time': when the property lost supply,
-      - 'regained_time': when the property regained supply, and
-      - 'duration': the interruption duration.
+    (True if in supply, False if out of supply), returns a list of outage events.
+    Each event is a dict with:
+      - 'lost_time': when supply was lost,
+      - 'regained_time': when supply was restored,
+      - 'duration': the outage duration as a timedelta.
     """
     interruptions = []
     in_interrupt = False
@@ -42,9 +42,7 @@ def get_supply_interruptions(time_series, status_series):
     return interruptions
 
 def format_timedelta(td):
-    """
-    Convert a timedelta object to a string in HH:MM:SS format.
-    """
+    """Convert a timedelta to HH:MM:SS string."""
     total_seconds = int(td.total_seconds())
     hours = total_seconds // 3600
     minutes = (total_seconds % 3600) // 60
@@ -53,8 +51,8 @@ def format_timedelta(td):
 
 def highlight_row_with_index(row, raw_durations):
     """
-    Look up the raw duration for the current row (by index) from the provided Series.
-    If the duration is 3 hours or more, return a list of CSS styles to highlight the row yellow.
+    For styling the raw table: if the raw duration (from the hidden column)
+    is 3 hours or more, highlight the row in yellow.
     """
     idx = row.name
     raw_dur = raw_durations.loc[idx]
@@ -65,9 +63,8 @@ def highlight_row_with_index(row, raw_durations):
 
 def generate_excel_file(results_df):
     """
-    Generate an Excel file in memory with conditional formatting.
-    The Excel file will include a hidden column with the raw duration in seconds,
-    and rows will be highlighted if that value is 10800 seconds (3 hours) or more.
+    Generate an Excel file (raw data) in memory with conditional formatting.
+    Uses a hidden column (Raw Duration in seconds) to highlight rows with outages ≥ 3 hours.
     """
     df_excel = results_df.copy()
     df_excel['Raw Duration (seconds)'] = df_excel['Raw Duration'].apply(
@@ -90,13 +87,84 @@ def generate_excel_file(results_df):
         highlight_format = workbook.add_format({'bg_color': '#FFFF00'})
         raw_col_letter = xl_col_to_name(raw_col_index)
         visible_range = f"A2:{xl_col_to_name(num_cols - 1)}{num_rows}"
-        formula = f"=${raw_col_letter}2>=10800"
+        formula = f"=${raw_col_letter}2>=10800"  # 10800 seconds = 3 hours
         worksheet.conditional_format(visible_range, {
             'type': 'formula',
             'criteria': formula,
             'format': highlight_format
         })
     return output.getvalue()
+
+def generate_processed_excel_file(processed_df):
+    """
+    Generate an Excel file (processed data) in memory.
+    The processed data contains only the combined outage events that meet the rule.
+    Columns: Property Height (m), Lost Supply, Regained Supply, Duration (formatted as HH:MM:SS).
+    """
+    df_excel = processed_df.copy()
+    # Format the Duration column
+    df_excel['Duration'] = df_excel['Duration'].apply(lambda x: format_timedelta(x) if pd.notnull(x) else "")
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df_excel.to_excel(writer, index=False, sheet_name='Processed Results')
+    return output.getvalue()
+
+def process_outages(result_rows):
+    """
+    Process raw outage events (from result_rows) to combine events that are separated
+    by a restoration period of less than one hour. For each property (by height),
+    if the combined outage duration is 3 hours or more, include it in the output.
+    Returns a list of dicts with keys: 
+      Property Height (m), Lost Supply, Regained Supply, Duration (timedelta).
+    """
+    processed = []
+    from collections import defaultdict
+    groups = defaultdict(list)
+    for row in result_rows:
+        # Exclude rows where there was no outage.
+        if row['Lost Supply'] != "In supply all times":
+            groups[row['Property Height (m)']].append(row)
+    for height, events in groups.items():
+        # Sort events by Lost Supply time.
+        events_sorted = sorted(events, key=lambda x: x['Lost Supply'])
+        current_event = None
+        for e in events_sorted:
+            if current_event is None:
+                current_event = {
+                    "Lost Supply": e["Lost Supply"],
+                    "Regained Supply": e["Regained Supply"],
+                    "Cumulative Duration": e["Raw Duration"]  # a timedelta
+                }
+            else:
+                restoration_duration = e["Lost Supply"] - current_event["Regained Supply"]
+                if restoration_duration < timedelta(hours=1):
+                    # Combine events: extend the outage and add the gap plus new outage.
+                    current_event["Regained Supply"] = e["Regained Supply"]
+                    current_event["Cumulative Duration"] += restoration_duration + e["Raw Duration"]
+                else:
+                    # Restoration period is long enough; finish current combined outage.
+                    if current_event["Cumulative Duration"] >= timedelta(hours=3):
+                        processed.append({
+                            "Property Height (m)": height,
+                            "Lost Supply": current_event["Lost Supply"],
+                            "Regained Supply": current_event["Regained Supply"],
+                            "Duration": current_event["Cumulative Duration"]
+                        })
+                    current_event = {
+                        "Lost Supply": e["Lost Supply"],
+                        "Regained Supply": e["Regained Supply"],
+                        "Cumulative Duration": e["Raw Duration"]
+                    }
+        if current_event is not None and current_event["Cumulative Duration"] >= timedelta(hours=3):
+            processed.append({
+                "Property Height (m)": height,
+                "Lost Supply": current_event["Lost Supply"],
+                "Regained Supply": current_event["Regained Supply"],
+                "Duration": current_event["Cumulative Duration"]
+            })
+    # Sort by property height from highest to lowest.
+    processed_sorted = sorted(processed, key=lambda x: x["Property Height (m)"], reverse=True)
+    return processed_sorted
 
 def main():
     st.title("Water Supply Interruption Calculator")
@@ -106,7 +174,7 @@ def main():
     if not password:
         st.info("Please enter the password to continue.")
         st.stop()
-    elif password != "mysecretpassword":  # Replace with your chosen password
+    elif password != "123":  # Replace with your chosen password
         st.error("Incorrect password")
         st.stop()
     # --- End Password Protection ---
@@ -144,12 +212,12 @@ def main():
         grouped = heights_df.groupby('Property_Height').size().reset_index(name='Count')
 
         result_rows = []
+        # Build raw outage events.
         for _, group_row in grouped.iterrows():
             property_height = group_row['Property_Height']
             count = group_row['Count']
             supply_status = pressure_df['Effective_Supply_Head'] > property_height
             interruptions = get_supply_interruptions(pressure_df[date_col], supply_status)
-
             if not interruptions:
                 result_rows.append({
                     'Property Height (m)': property_height,
@@ -158,11 +226,9 @@ def main():
                     'Regained Supply': "",
                     'Duration': "",
                     'Restoration Duration': "",
-                    'Raw Duration': None  # For internal use
+                    'Raw Duration': None
                 })
             else:
-                # For each interruption, compute outage duration.
-                # Also, if there are successive outages, compute restoration duration.
                 for i, intr in enumerate(interruptions):
                     formatted_duration = format_timedelta(intr['duration'])
                     if i > 0:
@@ -177,40 +243,59 @@ def main():
                         'Regained Supply': intr['regained_time'],
                         'Duration': formatted_duration,
                         'Restoration Duration': formatted_restoration,
-                        'Raw Duration': intr['duration']  # For internal use (for highlighting)
+                        'Raw Duration': intr['duration']
                     })
 
         results_df = pd.DataFrame(result_rows)
         raw_durations = results_df['Raw Duration']
         results_df_display = results_df.drop(columns=["Raw Duration"])
         styled_df = results_df_display.style.apply(lambda row: highlight_row_with_index(row, raw_durations), axis=1)
-        st.markdown("### Supply Interruption Results Table:")
+        st.markdown("### Raw Supply Interruption Results Table:")
         html_table = styled_df.to_html()
         st.markdown(html_table, unsafe_allow_html=True)
 
-        # --- Download Buttons ---
+        # --- Download Raw Data ---
         st.download_button(
-            label="Download Styled Table as HTML",
+            label="Download Raw Data as Excel (.xlsx)",
+            data=generate_excel_file(results_df),
+            file_name="raw_results.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        csv_data = results_df_display.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="Download Raw Data as CSV",
+            data=csv_data,
+            file_name="raw_results.csv",
+            mime="text/csv"
+        )
+        st.download_button(
+            label="Download Raw Data as HTML",
             data=html_table,
-            file_name="styled_table.html",
+            file_name="raw_results.html",
             mime="text/html"
         )
 
-        csv_data = results_df_display.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="Download Table as CSV",
-            data=csv_data,
-            file_name="results.csv",
-            mime="text/csv"
-        )
-
-        excel_data = generate_excel_file(results_df)
-        st.download_button(
-            label="Download Table as Excel (.xlsx)",
-            data=excel_data,
-            file_name="results.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        # --- Process Data for Additional Functionality ---
+        processed_events = process_outages(result_rows)
+        if processed_events:
+            processed_df = pd.DataFrame(processed_events)
+            # processed_df contains: Property Height (m), Lost Supply, Regained Supply, Duration (timedelta)
+            # Sort by property height descending.
+            processed_df = processed_df.sort_values(by="Property Height (m)", ascending=False)
+            # For display, format Duration as HH:MM:SS.
+            processed_df_display = processed_df.copy()
+            processed_df_display['Duration'] = processed_df_display['Duration'].apply(lambda x: format_timedelta(x))
+            st.markdown("### Processed Outages (Properties Truly Out of Supply)")
+            st.dataframe(processed_df_display)
+            processed_excel_data = generate_processed_excel_file(processed_df)
+            st.download_button(
+                label="Download Processed Data as Excel (.xlsx)",
+                data=processed_excel_data,
+                file_name="processed_results.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        else:
+            st.info("No processed outage events meet the criteria for being truly out of supply.")
 
 if __name__ == "__main__":
     main()
