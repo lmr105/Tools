@@ -99,7 +99,7 @@ def generate_processed_excel_file(processed_df):
     """
     Generate an Excel file (processed data) in memory.
     The processed data contains only the combined outage events that meet the rule.
-    Columns: Property Height (m), Lost Supply, Regained Supply, Duration (formatted as HH:MM:SS).
+    Columns: Property Height (m), Total Properties, Lost Supply, Regained Supply, Duration (formatted as HH:MM:SS).
     """
     df_excel = processed_df.copy()
     df_excel['Duration'] = df_excel['Duration'].apply(lambda x: format_timedelta(x) if pd.notnull(x) else "")
@@ -114,7 +114,7 @@ def process_outages(result_rows):
     by a restoration period of less than one hour. For each property (by height),
     if the combined outage duration is 3 hours or more, include it in the output.
     Returns a list of dicts with keys: 
-      Property Height (m), Lost Supply, Regained Supply, Duration (timedelta).
+      Property Height (m), Total Properties, Lost Supply, Regained Supply, Duration (timedelta).
     """
     processed = []
     from collections import defaultdict
@@ -141,6 +141,7 @@ def process_outages(result_rows):
                     if current_event["Cumulative Duration"] >= timedelta(hours=3):
                         processed.append({
                             "Property Height (m)": height,
+                            "Total Properties": events[0]["Total Properties"],
                             "Lost Supply": current_event["Lost Supply"],
                             "Regained Supply": current_event["Regained Supply"],
                             "Duration": current_event["Cumulative Duration"]
@@ -153,6 +154,7 @@ def process_outages(result_rows):
         if current_event is not None and current_event["Cumulative Duration"] >= timedelta(hours=3):
             processed.append({
                 "Property Height (m)": height,
+                "Total Properties": events[0]["Total Properties"],
                 "Lost Supply": current_event["Lost Supply"],
                 "Regained Supply": current_event["Regained Supply"],
                 "Duration": current_event["Cumulative Duration"]
@@ -204,12 +206,12 @@ def main():
 
         # Compute effective supply head for properties above the logger.
         pressure_df['Effective_Supply_Head'] = logger_height + (pressure_df[pressure_col] - 3)
-        grouped = heights_df.groupby('Property_Height').size().reset_index(name='Count')
+        grouped = heights_df.groupby('Property_Height').size().reset_index(name='Total Properties')
 
         result_rows = []
         for _, group_row in grouped.iterrows():
             property_height = group_row['Property_Height']
-            count = group_row['Count']
+            total_properties = group_row['Total Properties']
             # For properties at or below the logger height, use raw pressure > 0.
             if property_height <= logger_height:
                 supply_status = pressure_df[pressure_col] > 0
@@ -220,7 +222,7 @@ def main():
             if not interruptions:
                 result_rows.append({
                     'Property Height (m)': property_height,
-                    'Count': count,
+                    'Total Properties': total_properties,
                     'Lost Supply': "In supply all times",
                     'Regained Supply': "",
                     'Duration': "",
@@ -237,7 +239,7 @@ def main():
                         formatted_restoration = ""
                     result_rows.append({
                         'Property Height (m)': property_height,
-                        'Count': count,
+                        'Total Properties': total_properties,
                         'Lost Supply': intr['lost_time'],
                         'Regained Supply': intr['regained_time'],
                         'Duration': formatted_duration,
