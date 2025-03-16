@@ -199,10 +199,10 @@ st.markdown(
 )
 
 # Header image (update URL with your logo/image if desired)
-st.image("https://stormandshelter.com/assets/projects/Welsh-Water-PestSmart-Storm-And-Shelter-1024x576.png", use_container_width=True)
+st.image("https://www.dwrcymru.com/-/media/project/images/brand/logo/dcww-logo-colour-x2.ashx?h=36&w=140&la=en&hash=1FC5F218FEA70D80F68EA05374493D16", use_container_width=True)
 
 st.markdown("<div class='main-container'>", unsafe_allow_html=True)
-st.title("Water Supply Interruption Calculator")
+st.title("Supply Interruption Calculator")
 
 st.markdown("""
 **Instructions:**
