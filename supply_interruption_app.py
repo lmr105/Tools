@@ -169,7 +169,7 @@ def process_outages(result_rows):
 st.set_page_config(
     page_title="Supply Interruption Calculator",
     page_icon="💧",
-    layout="wide"
+    layout="centered"
 )
 
 # Custom CSS for improved styling.
@@ -204,7 +204,7 @@ st.markdown(
 
 # Place all UI elements inside one main container.
 with st.container():
-    st.title("Water Supply Interruption Calculator")
+    st.title("Supply Interruption Calculator")
     st.markdown("""
     **Instructions:**
     
