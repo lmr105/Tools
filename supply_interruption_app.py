@@ -178,7 +178,7 @@ st.markdown(
     <style>
     body {
         font-family: 'Arial', sans-serif;
-        background-color: #f7f7f7;
+        background-color: #D9EBEF;
     }
     .main-container {
         background-color: #ffffff;
