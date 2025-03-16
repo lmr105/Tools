@@ -199,7 +199,7 @@ st.markdown(
 )
 
 # Header image (update URL with your logo/image if desired)
-st.image("https://via.placeholder.com/800x150.png?text=Water+Supply+Interruption+Calculator", use_container_width=True)
+st.image("https://stormandshelter.com/assets/projects/Welsh-Water-PestSmart-Storm-And-Shelter-1024x576.png", use_container_width=True)
 
 st.markdown("<div class='main-container'>", unsafe_allow_html=True)
 st.title("Water Supply Interruption Calculator")
