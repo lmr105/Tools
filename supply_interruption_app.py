@@ -4,6 +4,8 @@ import io
 from datetime import datetime, timedelta
 from xlsxwriter.utility import xl_col_to_name
 
+# --- Helper Functions ---
+
 def get_supply_interruptions(time_series, status_series):
     """
     Given a time_series (Pandas Series of datetime objects) and a boolean status_series 
@@ -162,136 +164,178 @@ def process_outages(result_rows):
     processed_sorted = sorted(processed, key=lambda x: x["Property Height (m)"], reverse=True)
     return processed_sorted
 
-def main():
-    st.title("Water Supply Interruption Calculator - Copy/Paste Mode")
+# --- Main UI & Processing ---
+st.set_page_config(
+    page_title="Water Supply Interruption Calculator",
+    page_icon="💧",
+    layout="wide"
+)
 
-    st.markdown("""
-    **Instructions:**
-    1. **Pressure Data:**
-       - Open your CSV file in Excel.
-       - Copy the entire column of timestamps and paste it into the **Pressure Timestamps** box.
-       - Copy the entire column of pressure readings and paste it into the **Pressure Readings** box.
-    2. **Property Heights:**
-       - Copy the column of property heights and paste it into the **Property Heights** box.
-    3. Enter the height of the pressure logger.
-    4. Click the **Run Calculation** button below.
-    """)
+# Custom CSS for improved styling.
+st.markdown(
+    """
+    <style>
+    body {
+        font-family: 'Arial', sans-serif;
+        background-color: #f7f7f7;
+    }
+    .main-container {
+        background-color: #ffffff;
+        padding: 2rem;
+        border-radius: 10px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        margin: 2rem;
+    }
+    h1 {
+        color: #0056b3;
+    }
+    .stTextArea textarea {
+        background-color: #e8f0fe;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
+# Header image (replace URL with your own logo/image if desired)
+st.image("https://via.placeholder.com/800x150.png?text=Water+Supply+Interruption+Calculator", use_column_width=True)
+
+st.markdown("<div class='main-container'>", unsafe_allow_html=True)
+st.title("Water Supply Interruption Calculator")
+
+st.markdown("""
+**Instructions:**
+
+1. **Pressure Data:**
+   - Open your CSV file in Excel.
+   - Copy the entire column of timestamps and paste it into the **Pressure Timestamps** box.
+   - Copy the entire column of pressure readings and paste it into the **Pressure Readings** box.
+2. **Property Heights:**
+   - Copy the column of property heights and paste it into the **Property Heights** box.
+3. Enter the height of the pressure logger.
+4. Click the **Run Calculation** button.
+""")
+
+# Organize input fields in three columns.
+col1, col2, col3 = st.columns(3)
+with col1:
     pressure_timestamps_text = st.text_area("Pressure Timestamps (one per line)", height=150)
+with col2:
     pressure_readings_text = st.text_area("Pressure Readings (one per line)", height=150)
+with col3:
     property_heights_text = st.text_area("Property Heights (one per line)", height=150)
-    logger_height = st.number_input("Enter the height of the pressure logger (in meters):", min_value=0.0, value=100.0)
 
-    if st.button("Run Calculation"):
-        if pressure_timestamps_text and pressure_readings_text and property_heights_text:
-            # Convert pasted text into lists.
-            timestamps_list = [line.strip() for line in pressure_timestamps_text.splitlines() if line.strip()]
-            pressure_list = [line.strip() for line in pressure_readings_text.splitlines() if line.strip()]
-            heights_list = [line.strip() for line in property_heights_text.splitlines() if line.strip()]
+logger_height = st.number_input("Enter the height of the pressure logger (in meters):", min_value=0.0, value=100.0)
 
-            try:
-                pressure_df = pd.DataFrame({
-                    'Datetime': [pd.to_datetime(ts) for ts in timestamps_list],
-                    'Pressure': [float(p) for p in pressure_list]
+if st.button("Run Calculation"):
+    if pressure_timestamps_text and pressure_readings_text and property_heights_text:
+        # Convert pasted text into lists.
+        timestamps_list = [line.strip() for line in pressure_timestamps_text.splitlines() if line.strip()]
+        pressure_list = [line.strip() for line in pressure_readings_text.splitlines() if line.strip()]
+        heights_list = [line.strip() for line in property_heights_text.splitlines() if line.strip()]
+
+        try:
+            pressure_df = pd.DataFrame({
+                'Datetime': [pd.to_datetime(ts) for ts in timestamps_list],
+                'Pressure': [float(p) for p in pressure_list]
+            })
+        except Exception as e:
+            st.error(f"Error parsing pressure data: {e}")
+            st.stop()
+
+        try:
+            heights_df = pd.DataFrame({
+                'Property_Height': [float(h) for h in heights_list]
+            })
+        except Exception as e:
+            st.error(f"Error parsing property heights: {e}")
+            st.stop()
+
+        # Compute effective supply head for properties above the logger.
+        pressure_df['Effective_Supply_Head'] = logger_height + (pressure_df['Pressure'] - 3)
+        grouped = heights_df.groupby('Property_Height').size().reset_index(name='Total Properties')
+
+        result_rows = []
+        for _, group_row in grouped.iterrows():
+            property_height = group_row['Property_Height']
+            total_properties = group_row['Total Properties']
+            # For properties at or below the logger height, use raw pressure > 0.
+            if property_height <= logger_height:
+                supply_status = pressure_df['Pressure'] > 0
+            else:
+                supply_status = pressure_df['Effective_Supply_Head'] > property_height
+            interruptions = get_supply_interruptions(pressure_df['Datetime'], supply_status)
+            if not interruptions:
+                result_rows.append({
+                    'Property Height (m)': property_height,
+                    'Total Properties': total_properties,
+                    'Lost Supply': "In supply all times",
+                    'Regained Supply': "",
+                    'Duration': "",
+                    'Restoration Duration': "",
+                    'Raw Duration': None
                 })
-            except Exception as e:
-                st.error(f"Error parsing pressure data: {e}")
-                return
-
-            try:
-                heights_df = pd.DataFrame({
-                    'Property_Height': [float(h) for h in heights_list]
-                })
-            except Exception as e:
-                st.error(f"Error parsing property heights: {e}")
-                return
-
-            # Compute effective supply head for properties above the logger.
-            pressure_df['Effective_Supply_Head'] = logger_height + (pressure_df['Pressure'] - 3)
-            grouped = heights_df.groupby('Property_Height').size().reset_index(name='Total Properties')
-
-            result_rows = []
-            for _, group_row in grouped.iterrows():
-                property_height = group_row['Property_Height']
-                total_properties = group_row['Total Properties']
-                # For properties at or below the logger height, use raw pressure > 0.
-                if property_height <= logger_height:
-                    supply_status = pressure_df['Pressure'] > 0
-                else:
-                    supply_status = pressure_df['Effective_Supply_Head'] > property_height
-                interruptions = get_supply_interruptions(pressure_df['Datetime'], supply_status)
-                if not interruptions:
+            else:
+                for i, intr in enumerate(interruptions):
+                    formatted_duration = format_timedelta(intr['duration'])
+                    if i > 0:
+                        restoration_td = intr['lost_time'] - interruptions[i-1]['regained_time']
+                        formatted_restoration = format_timedelta(restoration_td)
+                    else:
+                        formatted_restoration = ""
                     result_rows.append({
                         'Property Height (m)': property_height,
                         'Total Properties': total_properties,
-                        'Lost Supply': "In supply all times",
-                        'Regained Supply': "",
-                        'Duration': "",
-                        'Restoration Duration': "",
-                        'Raw Duration': None
+                        'Lost Supply': intr['lost_time'],
+                        'Regained Supply': intr['regained_time'],
+                        'Duration': formatted_duration,
+                        'Restoration Duration': formatted_restoration,
+                        'Raw Duration': intr['duration']
                     })
-                else:
-                    for i, intr in enumerate(interruptions):
-                        formatted_duration = format_timedelta(intr['duration'])
-                        if i > 0:
-                            restoration_td = intr['lost_time'] - interruptions[i-1]['regained_time']
-                            formatted_restoration = format_timedelta(restoration_td)
-                        else:
-                            formatted_restoration = ""
-                        result_rows.append({
-                            'Property Height (m)': property_height,
-                            'Total Properties': total_properties,
-                            'Lost Supply': intr['lost_time'],
-                            'Regained Supply': intr['regained_time'],
-                            'Duration': formatted_duration,
-                            'Restoration Duration': formatted_restoration,
-                            'Raw Duration': intr['duration']
-                        })
 
-            results_df = pd.DataFrame(result_rows)
-            # Prepare data for raw downloads.
-            raw_durations = results_df['Raw Duration']
-            results_df_display = results_df.drop(columns=["Raw Duration"])
-            raw_excel = generate_excel_file(results_df)
-            raw_csv = results_df_display.to_csv(index=False).encode('utf-8')
-            raw_html = results_df_display.to_html()
+        results_df = pd.DataFrame(result_rows)
+        # Prepare raw data outputs.
+        raw_durations = results_df['Raw Duration']
+        results_df_display = results_df.drop(columns=["Raw Duration"])
+        raw_excel = generate_excel_file(results_df)
+        raw_csv = results_df_display.to_csv(index=False).encode('utf-8')
+        raw_html = results_df_display.to_html()
 
-            # Provide download buttons for raw data.
+        # Provide download buttons for raw data.
+        st.download_button(
+            label="Download Raw Data as Excel (.xlsx)",
+            data=raw_excel,
+            file_name="raw_results.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        st.download_button(
+            label="Download Raw Data as CSV",
+            data=raw_csv,
+            file_name="raw_results.csv",
+            mime="text/csv"
+        )
+        st.download_button(
+            label="Download Raw Data as HTML",
+            data=raw_html,
+            file_name="raw_results.html",
+            mime="text/html"
+        )
+
+        # Process data for additional functionality.
+        processed_events = process_outages(result_rows)
+        if processed_events:
+            processed_df = pd.DataFrame(processed_events)
+            processed_df = processed_df.sort_values(by="Property Height (m)", ascending=False)
+            processed_excel_data = generate_processed_excel_file(processed_df)
             st.download_button(
-                label="Download Raw Data as Excel (.xlsx)",
-                data=raw_excel,
-                file_name="raw_results.xlsx",
+                label="Download Processed Data as Excel (.xlsx)",
+                data=processed_excel_data,
+                file_name="processed_results.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-            st.download_button(
-                label="Download Raw Data as CSV",
-                data=raw_csv,
-                file_name="raw_results.csv",
-                mime="text/csv"
-            )
-            st.download_button(
-                label="Download Raw Data as HTML",
-                data=raw_html,
-                file_name="raw_results.html",
-                mime="text/html"
-            )
-
-            # Process data for additional functionality.
-            processed_events = process_outages(result_rows)
-            if processed_events:
-                processed_df = pd.DataFrame(processed_events)
-                processed_df = processed_df.sort_values(by="Property Height (m)", ascending=False)
-                processed_excel_data = generate_processed_excel_file(processed_df)
-                st.download_button(
-                    label="Download Processed Data as Excel (.xlsx)",
-                    data=processed_excel_data,
-                    file_name="processed_results.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
-            else:
-                st.info("No processed outage events meet the criteria for being truly out of supply.")
         else:
-            st.error("Please provide data in all text areas.")
+            st.info("No processed outage events meet the criteria for being truly out of supply.")
+    else:
+        st.error("Please provide data in all text areas.")
 
-if __name__ == "__main__":
-    main()
+st.markdown("</div>", unsafe_allow_html=True)
