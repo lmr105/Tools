@@ -165,6 +165,7 @@ def process_outages(result_rows):
     return processed_sorted
 
 # --- Main UI & Processing ---
+
 st.set_page_config(
     page_title="Water Supply Interruption Calculator",
     page_icon="💧",
@@ -197,8 +198,8 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# Header image (replace URL with your own logo/image if desired)
-st.image("https://via.placeholder.com/800x150.png?text=Water+Supply+Interruption+Calculator", use_column_width=True)
+# Header image (update URL with your logo/image if desired)
+st.image("https://via.placeholder.com/800x150.png?text=Water+Supply+Interruption+Calculator", use_container_width=True)
 
 st.markdown("<div class='main-container'>", unsafe_allow_html=True)
 st.title("Water Supply Interruption Calculator")
