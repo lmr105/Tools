@@ -181,7 +181,7 @@ st.markdown(
         background-color: #D9EBEF;
     }
     .main-container {
-        background-color: #ffffff;
+        background-color: ##D9EBEF;
         padding: 2rem;
         border-radius: 10px;
         box-shadow: 0 2px 5px rgba(0,0,0,0.1);
