@@ -163,137 +163,135 @@ def process_outages(result_rows):
     return processed_sorted
 
 def main():
-    st.title("Water Supply Interruption Calculator")
-
-    # --- Password Protection ---
-    password = st.text_input("Enter password to access the app", type="password")
-    if not password:
-        st.info("Please enter the password to continue.")
-        st.stop()
-    elif password != "123":  # Replace with your chosen password
-        st.error("Incorrect password")
-        st.stop()
-    # --- End Password Protection ---
+    st.title("Water Supply Interruption Calculator - Copy/Paste Mode")
 
     st.markdown("""
     **Instructions:**
-    - Upload the **Pressure Data CSV** (with two columns: date/time and pressure in meters head).
-    - Upload the **Property Heights CSV** (with a single column of property heights in meters).
-    - Enter the height of the pressure logger (in meters).
+    1. **Pressure Data:**
+       - Open your CSV file in Excel.
+       - Copy the entire column of timestamps and paste it into the **Pressure Timestamps** box.
+       - Copy the entire column of pressure readings and paste it into the **Pressure Readings** box.
+    2. **Property Heights:**
+       - Copy the column of property heights and paste it into the **Property Heights** box.
+    3. Enter the height of the pressure logger.
+    4. Click the **Run Calculation** button below.
     """)
 
-    pressure_file = st.file_uploader("Upload Pressure Data CSV", type=["csv"])
-    heights_file = st.file_uploader("Upload Property Heights CSV", type=["csv"])
+    pressure_timestamps_text = st.text_area("Pressure Timestamps (one per line)", height=150)
+    pressure_readings_text = st.text_area("Pressure Readings (one per line)", height=150)
+    property_heights_text = st.text_area("Property Heights (one per line)", height=150)
     logger_height = st.number_input("Enter the height of the pressure logger (in meters):", min_value=0.0, value=100.0)
 
-    if pressure_file is not None and heights_file is not None:
-        try:
-            pressure_df = pd.read_csv(pressure_file)
-            date_col = pressure_df.columns[0]
-            pressure_col = pressure_df.columns[1]
-            pressure_df[date_col] = pd.to_datetime(pressure_df[date_col])
-            pressure_df.sort_values(date_col, inplace=True)
-        except Exception as e:
-            st.error(f"Error processing pressure data: {e}")
-            return
+    if st.button("Run Calculation"):
+        if pressure_timestamps_text and pressure_readings_text and property_heights_text:
+            # Convert pasted text into lists.
+            timestamps_list = [line.strip() for line in pressure_timestamps_text.splitlines() if line.strip()]
+            pressure_list = [line.strip() for line in pressure_readings_text.splitlines() if line.strip()]
+            heights_list = [line.strip() for line in property_heights_text.splitlines() if line.strip()]
 
-        try:
-            heights_df = pd.read_csv(heights_file, header=None, dtype={0: float})
-            heights_df.columns = ['Property_Height']
-        except Exception as e:
-            st.error(f"Error processing property heights: {e}")
-            return
-
-        # Compute effective supply head for properties above the logger.
-        pressure_df['Effective_Supply_Head'] = logger_height + (pressure_df[pressure_col] - 3)
-        grouped = heights_df.groupby('Property_Height').size().reset_index(name='Total Properties')
-
-        result_rows = []
-        for _, group_row in grouped.iterrows():
-            property_height = group_row['Property_Height']
-            total_properties = group_row['Total Properties']
-            # For properties at or below the logger height, use raw pressure > 0.
-            if property_height <= logger_height:
-                supply_status = pressure_df[pressure_col] > 0
-            else:
-                supply_status = pressure_df['Effective_Supply_Head'] > property_height
-            interruptions = get_supply_interruptions(pressure_df[date_col], supply_status)
-
-            if not interruptions:
-                result_rows.append({
-                    'Property Height (m)': property_height,
-                    'Total Properties': total_properties,
-                    'Lost Supply': "In supply all times",
-                    'Regained Supply': "",
-                    'Duration': "",
-                    'Restoration Duration': "",
-                    'Raw Duration': None
+            try:
+                pressure_df = pd.DataFrame({
+                    'Datetime': [pd.to_datetime(ts) for ts in timestamps_list],
+                    'Pressure': [float(p) for p in pressure_list]
                 })
-            else:
-                for i, intr in enumerate(interruptions):
-                    formatted_duration = format_timedelta(intr['duration'])
-                    if i > 0:
-                        restoration_td = intr['lost_time'] - interruptions[i-1]['regained_time']
-                        formatted_restoration = format_timedelta(restoration_td)
-                    else:
-                        formatted_restoration = ""
+            except Exception as e:
+                st.error(f"Error parsing pressure data: {e}")
+                return
+
+            try:
+                heights_df = pd.DataFrame({
+                    'Property_Height': [float(h) for h in heights_list]
+                })
+            except Exception as e:
+                st.error(f"Error parsing property heights: {e}")
+                return
+
+            # Compute effective supply head for properties above the logger.
+            pressure_df['Effective_Supply_Head'] = logger_height + (pressure_df['Pressure'] - 3)
+            grouped = heights_df.groupby('Property_Height').size().reset_index(name='Total Properties')
+
+            result_rows = []
+            for _, group_row in grouped.iterrows():
+                property_height = group_row['Property_Height']
+                total_properties = group_row['Total Properties']
+                # For properties at or below the logger height, use raw pressure > 0.
+                if property_height <= logger_height:
+                    supply_status = pressure_df['Pressure'] > 0
+                else:
+                    supply_status = pressure_df['Effective_Supply_Head'] > property_height
+                interruptions = get_supply_interruptions(pressure_df['Datetime'], supply_status)
+                if not interruptions:
                     result_rows.append({
                         'Property Height (m)': property_height,
                         'Total Properties': total_properties,
-                        'Lost Supply': intr['lost_time'],
-                        'Regained Supply': intr['regained_time'],
-                        'Duration': formatted_duration,
-                        'Restoration Duration': formatted_restoration,
-                        'Raw Duration': intr['duration']
+                        'Lost Supply': "In supply all times",
+                        'Regained Supply': "",
+                        'Duration': "",
+                        'Restoration Duration': "",
+                        'Raw Duration': None
                     })
+                else:
+                    for i, intr in enumerate(interruptions):
+                        formatted_duration = format_timedelta(intr['duration'])
+                        if i > 0:
+                            restoration_td = intr['lost_time'] - interruptions[i-1]['regained_time']
+                            formatted_restoration = format_timedelta(restoration_td)
+                        else:
+                            formatted_restoration = ""
+                        result_rows.append({
+                            'Property Height (m)': property_height,
+                            'Total Properties': total_properties,
+                            'Lost Supply': intr['lost_time'],
+                            'Regained Supply': intr['regained_time'],
+                            'Duration': formatted_duration,
+                            'Restoration Duration': formatted_restoration,
+                            'Raw Duration': intr['duration']
+                        })
 
-        results_df = pd.DataFrame(result_rows)
-        raw_durations = results_df['Raw Duration']
-        results_df_display = results_df.drop(columns=["Raw Duration"])
-        styled_df = results_df_display.style.apply(lambda row: highlight_row_with_index(row, raw_durations), axis=1)
-        st.markdown("### Raw Supply Interruption Results Table:")
-        html_table = styled_df.to_html()
-        st.markdown(html_table, unsafe_allow_html=True)
+            results_df = pd.DataFrame(result_rows)
+            # Prepare data for raw downloads.
+            raw_durations = results_df['Raw Duration']
+            results_df_display = results_df.drop(columns=["Raw Duration"])
+            raw_excel = generate_excel_file(results_df)
+            raw_csv = results_df_display.to_csv(index=False).encode('utf-8')
+            raw_html = results_df_display.to_html()
 
-        # --- Download Raw Data ---
-        st.download_button(
-            label="Download Raw Data as Excel (.xlsx)",
-            data=generate_excel_file(results_df),
-            file_name="raw_results.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-        csv_data = results_df_display.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="Download Raw Data as CSV",
-            data=csv_data,
-            file_name="raw_results.csv",
-            mime="text/csv"
-        )
-        st.download_button(
-            label="Download Raw Data as HTML",
-            data=html_table,
-            file_name="raw_results.html",
-            mime="text/html"
-        )
-
-        # --- Process Data for Additional Functionality ---
-        processed_events = process_outages(result_rows)
-        if processed_events:
-            processed_df = pd.DataFrame(processed_events)
-            processed_df = processed_df.sort_values(by="Property Height (m)", ascending=False)
-            processed_df_display = processed_df.copy()
-            processed_df_display['Duration'] = processed_df_display['Duration'].apply(lambda x: format_timedelta(x))
-            st.markdown("### Processed Outages (Properties Truly Out of Supply)")
-            st.dataframe(processed_df_display)
-            processed_excel_data = generate_processed_excel_file(processed_df)
+            # Provide download buttons for raw data.
             st.download_button(
-                label="Download Processed Data as Excel (.xlsx)",
-                data=processed_excel_data,
-                file_name="processed_results.xlsx",
+                label="Download Raw Data as Excel (.xlsx)",
+                data=raw_excel,
+                file_name="raw_results.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+            st.download_button(
+                label="Download Raw Data as CSV",
+                data=raw_csv,
+                file_name="raw_results.csv",
+                mime="text/csv"
+            )
+            st.download_button(
+                label="Download Raw Data as HTML",
+                data=raw_html,
+                file_name="raw_results.html",
+                mime="text/html"
+            )
+
+            # Process data for additional functionality.
+            processed_events = process_outages(result_rows)
+            if processed_events:
+                processed_df = pd.DataFrame(processed_events)
+                processed_df = processed_df.sort_values(by="Property Height (m)", ascending=False)
+                processed_excel_data = generate_processed_excel_file(processed_df)
+                st.download_button(
+                    label="Download Processed Data as Excel (.xlsx)",
+                    data=processed_excel_data,
+                    file_name="processed_results.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            else:
+                st.info("No processed outage events meet the criteria for being truly out of supply.")
         else:
-            st.info("No processed outage events meet the criteria for being truly out of supply.")
+            st.error("Please provide data in all text areas.")
 
 if __name__ == "__main__":
     main()
