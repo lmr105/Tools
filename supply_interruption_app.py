@@ -228,8 +228,9 @@ with st.container():
             heights_list = [line.strip() for line in property_heights_text.splitlines() if line.strip()]
 
             try:
+                # Parse timestamps using the UK format "DD/MM/YYYY HH:MM"
                 pressure_df = pd.DataFrame({
-                    'Datetime': [pd.to_datetime(ts) for ts in timestamps_list],
+                    'Datetime': [pd.to_datetime(ts, format="%d/%m/%Y %H:%M") for ts in timestamps_list],
                     'Pressure': [float(p) for p in pressure_list]
                 })
             except Exception as e:
@@ -256,7 +257,6 @@ with st.container():
                 property_height = group_row['Property_Height']
                 total_properties = group_row['Total Properties']
                 if property_height <= logger_height:
-                    # For properties at or below the logger, use modified pressure > 0.
                     supply_status = pressure_df['Modified_Pressure'] > 0
                 else:
                     supply_status = pressure_df['Effective_Supply_Head'] > property_height
