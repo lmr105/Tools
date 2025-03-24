@@ -169,31 +169,32 @@ def process_outages(result_rows):
 # --------------------
 # Landing Page / Mode Selection
 # --------------------
-
-# Initialize mode selection in session state.
 if "mode" not in st.session_state:
     st.session_state.mode = None
 
-# If no mode is selected, display the landing page.
 if st.session_state.mode is None:
     st.title("Water Supply Interruption Calculator")
     st.markdown("Select a mode below:")
     col1, col2 = st.columns(2)
     if col1.button("Review"):
         st.session_state.mode = "Review"
-        st.experimental_rerun()
+        try:
+            st.experimental_rerun()
+        except AttributeError:
+            st.warning("Please refresh the page manually.")
     if col2.button("Reactive"):
         st.session_state.mode = "Reactive"
-        st.experimental_rerun()
+        try:
+            st.experimental_rerun()
+        except AttributeError:
+            st.warning("Please refresh the page manually.")
 
 # --------------------
 # Review Mode Section
 # --------------------
 if st.session_state.mode == "Review":
-    # Set page configuration (centered layout if desired)
     st.set_page_config(page_title="Review Mode", layout="wide")
     
-    # Custom CSS and container (same as before)
     st.markdown(
         """
         <style>
@@ -348,4 +349,7 @@ if st.session_state.mode == "Reactive":
     st.write("The Reactive mode features are under development. Please check back later.")
     if st.button("Return to Mode Selection"):
         st.session_state.mode = None
-        st.experimental_rerun()
+        try:
+            st.experimental_rerun()
+        except AttributeError:
+            st.warning("Please refresh the page manually.")
