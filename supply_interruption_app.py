@@ -166,6 +166,44 @@ def process_outages(result_rows):
     processed_sorted = sorted(processed, key=lambda x: x["Property Height (m)"], reverse=True)
     return processed_sorted
 
+def compute_quick_table(pressure_df, logger_height, additional_headloss, unique_heights):
+    """
+    For each property height in unique_heights, determine the supply status at the last timestamp.
+    If the property is out of supply, compute the duration since it was last in supply (or since the first timestamp if never in supply).
+    Returns a DataFrame with columns: Property Height (m), Supply Status, and Outage Duration.
+    """
+    modified_pressure = pressure_df['Pressure'] - additional_headloss
+    effective_supply_head = logger_height + (modified_pressure - 3)
+    last_time = pressure_df['Datetime'].iloc[-1]
+    first_time = pressure_df['Datetime'].iloc[0]
+    rows = []
+    for h in unique_heights:
+        if h <= logger_height:
+            condition = modified_pressure > 0
+        else:
+            condition = effective_supply_head > h
+        last_status = condition.iloc[-1]
+        if last_status:
+            supply_status = "In Supply"
+            outage_duration_str = ""
+        else:
+            true_indices = condition[condition].index
+            if not true_indices.empty:
+                last_in_supply = pressure_df['Datetime'].loc[true_indices[-1]]
+                outage_duration = last_time - last_in_supply
+                supply_status = "Out of Supply"
+                outage_duration_str = format_timedelta(outage_duration)
+            else:
+                supply_status = "Out of Supply"
+                outage_duration = last_time - first_time
+                outage_duration_str = format_timedelta(outage_duration)
+        rows.append({
+            "Property Height (m)": h,
+            "Supply Status": supply_status,
+            "Outage Duration": outage_duration_str
+        })
+    return pd.DataFrame(rows)
+
 # --------------------
 # Main UI & Processing (Review Mode)
 # --------------------
@@ -189,12 +227,12 @@ st.markdown(
 
 # Centered, resized logo.
 st.markdown(
-    "<div style='text-align: center;'><img src='https://www.dwrcymru.com/-/media/project/images/brand/logo/dcww-logo-colour-x2.ashx?h=36&w=140&la=en&hash=1FC5F218FEA70D80F68EA05374493D16' width='400'></div>",
+    "<div style='text-align: center;'><img src='https://via.placeholder.com/800x150.png?text=Water+Supply+Interruption+Calculator' width='400'></div>",
     unsafe_allow_html=True
 )
 
 with st.container():
-    st.title("Supply Interruption Analysis")
+    st.title("Review Mode - Supply Interruption Analysis")
     st.markdown("""
     **Instructions:**
 
@@ -205,9 +243,8 @@ with st.container():
     2. **Property Heights:**
        - Copy the column of property heights and paste it into the **Property Heights** box.
     3. Enter the height of the pressure logger.
-    4. **Optional:**
-        - Enter simulated additional headloss (in meters) to deduct from pressure readings, this can be used to loosely predict changes in impact during higher demand periods.
-    5. Click the **Run Calculation** button.
+    4. Enter the simulated additional headloss (in meters) to deduct from the pressure readings.
+    5. Click **Run Analysis** to perform the full analysis (downloadable results) or click **Quick Table** to view an on‑screen summary of current supply status.
     """)
 
     col1, col2, col3 = st.columns(3)
@@ -221,15 +258,15 @@ with st.container():
     logger_height = st.number_input("Enter the height of the pressure logger (in meters):", min_value=0.0, value=100.0)
     additional_headloss = st.number_input("Simulate additional headloss (in meters):", min_value=0.0, value=0.0, step=0.1)
 
-    if st.button("Run Calculation"):
+    # Full analysis button ("Run Analysis")
+    if st.button("Run Analysis"):
         if pressure_timestamps_text and pressure_readings_text and property_heights_text:
-            # Convert pasted text into lists.
             timestamps_list = [line.strip() for line in pressure_timestamps_text.splitlines() if line.strip()]
             pressure_list = [line.strip() for line in pressure_readings_text.splitlines() if line.strip()]
             heights_list = [line.strip() for line in property_heights_text.splitlines() if line.strip()]
 
             try:
-                # Parse timestamps using the UK format "DD/MM/YYYY HH:MM"
+                # Parse timestamps using UK format "DD/MM/YYYY HH:MM"
                 pressure_df = pd.DataFrame({
                     'Datetime': [pd.to_datetime(ts, format="%d/%m/%Y %H:%M") for ts in timestamps_list],
                     'Pressure': [float(p) for p in pressure_list]
@@ -294,7 +331,6 @@ with st.container():
             raw_durations = results_df['Raw Duration']
             results_df_display = results_df.drop(columns=["Raw Duration"])
             raw_excel = generate_excel_file(results_df)
-            # Only provide Excel download buttons.
             st.download_button(
                 label="Download Raw Data as Excel (.xlsx)",
                 data=raw_excel,
@@ -317,3 +353,73 @@ with st.container():
                 st.info("No processed outage events meet the criteria for being truly out of supply.")
         else:
             st.error("Please provide data in all text areas.")
+
+    # Quick Table button to display on-screen a supply status summary.
+    if st.button("Quick Table"):
+        if pressure_timestamps_text and pressure_readings_text and property_heights_text:
+            timestamps_list = [line.strip() for line in pressure_timestamps_text.splitlines() if line.strip()]
+            pressure_list = [line.strip() for line in pressure_readings_text.splitlines() if line.strip()]
+            heights_list = [line.strip() for line in property_heights_text.splitlines() if line.strip()]
+            try:
+                pressure_df = pd.DataFrame({
+                    'Datetime': [pd.to_datetime(ts, format="%d/%m/%Y %H:%M") for ts in timestamps_list],
+                    'Pressure': [float(p) for p in pressure_list]
+                })
+            except Exception as e:
+                st.error(f"Error parsing pressure data: {e}")
+                st.stop()
+            try:
+                heights_df = pd.DataFrame({
+                    'Property_Height': [float(h) for h in heights_list]
+                })
+            except Exception as e:
+                st.error(f"Error parsing property heights: {e}")
+                st.stop()
+
+            pressure_df['Modified_Pressure'] = pressure_df['Pressure'] - additional_headloss
+            pressure_df['Effective_Supply_Head'] = logger_height + (pressure_df['Modified_Pressure'] - 3)
+            unique_heights = sorted(heights_df['Property_Height'].unique())
+            quick_df = compute_quick_table(pressure_df, logger_height, additional_headloss, unique_heights)
+            st.markdown("### Quick Supply Status Table")
+            st.dataframe(quick_df)
+        else:
+            st.error("Please provide data in all text areas.")
+
+def compute_quick_table(pressure_df, logger_height, additional_headloss, unique_heights):
+    """
+    Computes a quick supply status table.
+    For each property height, determines if it is in supply at the last timestamp.
+    If out of supply, calculates how long it has been out (based on the last in-supply reading, or since the start).
+    Returns a DataFrame with columns: Property Height (m), Supply Status, Outage Duration.
+    """
+    modified_pressure = pressure_df['Pressure'] - additional_headloss
+    effective_supply_head = logger_height + (modified_pressure - 3)
+    last_time = pressure_df['Datetime'].iloc[-1]
+    first_time = pressure_df['Datetime'].iloc[0]
+    rows = []
+    for h in unique_heights:
+        if h <= logger_height:
+            condition = modified_pressure > 0
+        else:
+            condition = effective_supply_head > h
+        last_status = condition.iloc[-1]
+        if last_status:
+            supply_status = "In Supply"
+            outage_duration_str = ""
+        else:
+            true_indices = condition[condition].index
+            if not true_indices.empty:
+                last_in_supply = pressure_df['Datetime'].loc[true_indices[-1]]
+                outage_duration = last_time - last_in_supply
+                supply_status = "Out of Supply"
+                outage_duration_str = format_timedelta(outage_duration)
+            else:
+                supply_status = "Out of Supply"
+                outage_duration = last_time - first_time
+                outage_duration_str = format_timedelta(outage_duration)
+        rows.append({
+            "Property Height (m)": h,
+            "Supply Status": supply_status,
+            "Outage Duration": outage_duration_str
+        })
+    return pd.DataFrame(rows)
