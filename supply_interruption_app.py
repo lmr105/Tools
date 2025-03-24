@@ -189,12 +189,12 @@ st.markdown(
 
 # Centered, resized logo.
 st.markdown(
-    "<div style='text-align: center;'><img src='https://via.placeholder.com/800x150.png?text=Water+Supply+Interruption+Calculator' width='400'></div>",
+    "<div style='text-align: center;'><img src='https://www.dwrcymru.com/-/media/project/images/brand/logo/dcww-logo-colour-x2.ashx?h=36&w=140&la=en&hash=1FC5F218FEA70D80F68EA05374493D16' width='400'></div>",
     unsafe_allow_html=True
 )
 
 with st.container():
-    st.title("Review Mode - Supply Interruption Analysis")
+    st.title("Supply Interruption Analysis")
     st.markdown("""
     **Instructions:**
 
@@ -205,7 +205,8 @@ with st.container():
     2. **Property Heights:**
        - Copy the column of property heights and paste it into the **Property Heights** box.
     3. Enter the height of the pressure logger.
-    4. Enter the simulated additional headloss (in meters) to deduct from the pressure readings.
+    4. **Optional:**
+        - Enter simulated additional headloss (in meters) to deduct from pressure readings, this can be used to loosely predict changes in impact during higher demand periods.
     5. Click the **Run Calculation** button.
     """)
 
