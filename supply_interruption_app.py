@@ -5,6 +5,15 @@ from datetime import datetime, timedelta
 from xlsxwriter.utility import xl_col_to_name
 
 # --------------------
+# Set Page Config (only once at the very beginning)
+# --------------------
+st.set_page_config(
+    page_title="Water Supply Interruption Calculator",
+    page_icon="💧",
+    layout="wide"
+)
+
+# --------------------
 # Helper Functions
 # --------------------
 
@@ -193,8 +202,6 @@ if st.session_state.mode is None:
 # Review Mode Section
 # --------------------
 if st.session_state.mode == "Review":
-    st.set_page_config(page_title="Review Mode", layout="wide")
-    
     st.markdown(
         """
         <style>
@@ -344,7 +351,6 @@ if st.session_state.mode == "Review":
 # Reactive Mode Section (Placeholder)
 # --------------------
 if st.session_state.mode == "Reactive":
-    st.set_page_config(page_title="Reactive Mode", layout="centered")
     st.title("Reactive Mode - Coming Soon")
     st.write("The Reactive mode features are under development. Please check back later.")
     if st.button("Return to Mode Selection"):
