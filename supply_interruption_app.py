@@ -4,7 +4,9 @@ import io
 from datetime import datetime, timedelta
 from xlsxwriter.utility import xl_col_to_name
 
-# --- Helper Functions ---
+# --------------------
+# Helper Functions
+# --------------------
 
 def get_supply_interruptions(time_series, status_series):
     """
@@ -164,8 +166,9 @@ def process_outages(result_rows):
     processed_sorted = sorted(processed, key=lambda x: x["Property Height (m)"], reverse=True)
     return processed_sorted
 
-# --- Main UI & Processing ---
-
+# --------------------
+# Main UI & Processing (Review Mode)
+# --------------------
 st.set_page_config(
     page_title="Water Supply Interruption Calculator",
     page_icon="💧",
@@ -176,38 +179,25 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    body {
-        font-family: 'Arial', sans-serif;
-        background-color: #f7f7f7;
-    }
-    .main-container {
-        background-color: #ffffff;
-        padding: 2rem;
-        border-radius: 10px;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-        margin: 2rem auto;
-        max-width: 1200px;
-    }
-    .stTextArea textarea {
-        background-color: #e8f0fe;
-    }
+    body { font-family: 'Arial', sans-serif; background-color: #f7f7f7; }
+    .main-container { background-color: #ffffff; padding: 2rem; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin: 2rem auto; max-width: 1200px; }
+    .stTextArea textarea { background-color: #e8f0fe; }
     </style>
     """,
     unsafe_allow_html=True
 )
 
-# Header with centered logo (smaller width) and no extra blank box.
+# Centered, resized logo.
 st.markdown(
-    "<div style='text-align: center;'><img src='https://www.dwrcymru.com/-/media/project/images/brand/logo/dcww-logo-colour-x2.ashx?h=36&w=140&la=en&hash=1FC5F218FEA70D80F68EA05374493D16' width='400'></div>",
+    "<div style='text-align: center;'><img src='https://via.placeholder.com/800x150.png?text=Water+Supply+Interruption+Calculator' width='400'></div>",
     unsafe_allow_html=True
 )
 
-# Place all UI elements inside one main container.
 with st.container():
-    st.title("Water Supply Interruption Calculator")
+    st.title("Review Mode - Supply Interruption Analysis")
     st.markdown("""
     **Instructions:**
-    
+
     1. **Pressure Data:**
        - Open your CSV file in Excel.
        - Copy the entire column of timestamps and paste it into the **Pressure Timestamps** box.
@@ -215,10 +205,10 @@ with st.container():
     2. **Property Heights:**
        - Copy the column of property heights and paste it into the **Property Heights** box.
     3. Enter the height of the pressure logger.
-    4. Click the **Run Calculation** button.
+    4. Enter the simulated additional headloss (in meters) to deduct from the pressure readings.
+    5. Click the **Run Calculation** button.
     """)
 
-    # Organize input fields in three columns.
     col1, col2, col3 = st.columns(3)
     with col1:
         pressure_timestamps_text = st.text_area("Pressure Timestamps (one per line)", height=150)
@@ -228,6 +218,7 @@ with st.container():
         property_heights_text = st.text_area("Property Heights (one per line)", height=150)
 
     logger_height = st.number_input("Enter the height of the pressure logger (in meters):", min_value=0.0, value=100.0)
+    additional_headloss = st.number_input("Simulate additional headloss (in meters):", min_value=0.0, value=0.0, step=0.1)
 
     if st.button("Run Calculation"):
         if pressure_timestamps_text and pressure_readings_text and property_heights_text:
@@ -253,17 +244,20 @@ with st.container():
                 st.error(f"Error parsing property heights: {e}")
                 st.stop()
 
+            # Apply simulated additional headloss.
+            pressure_df['Modified_Pressure'] = pressure_df['Pressure'] - additional_headloss
+
             # Compute effective supply head for properties above the logger.
-            pressure_df['Effective_Supply_Head'] = logger_height + (pressure_df['Pressure'] - 3)
+            pressure_df['Effective_Supply_Head'] = logger_height + (pressure_df['Modified_Pressure'] - 3)
             grouped = heights_df.groupby('Property_Height').size().reset_index(name='Total Properties')
 
             result_rows = []
             for _, group_row in grouped.iterrows():
                 property_height = group_row['Property_Height']
                 total_properties = group_row['Total Properties']
-                # For properties at or below the logger height, use raw pressure > 0.
                 if property_height <= logger_height:
-                    supply_status = pressure_df['Pressure'] > 0
+                    # For properties at or below the logger, use modified pressure > 0.
+                    supply_status = pressure_df['Modified_Pressure'] > 0
                 else:
                     supply_status = pressure_df['Effective_Supply_Head'] > property_height
                 interruptions = get_supply_interruptions(pressure_df['Datetime'], supply_status)
@@ -296,34 +290,17 @@ with st.container():
                         })
 
             results_df = pd.DataFrame(result_rows)
-            # Prepare raw data outputs.
             raw_durations = results_df['Raw Duration']
             results_df_display = results_df.drop(columns=["Raw Duration"])
             raw_excel = generate_excel_file(results_df)
-            raw_csv = results_df_display.to_csv(index=False).encode('utf-8')
-            raw_html = results_df_display.to_html()
-
-            # Provide download buttons for raw data.
+            # Only provide Excel download buttons.
             st.download_button(
                 label="Download Raw Data as Excel (.xlsx)",
                 data=raw_excel,
                 file_name="raw_results.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-            st.download_button(
-                label="Download Raw Data as CSV",
-                data=raw_csv,
-                file_name="raw_results.csv",
-                mime="text/csv"
-            )
-            st.download_button(
-                label="Download Raw Data as HTML",
-                data=raw_html,
-                file_name="raw_results.html",
-                mime="text/html"
-            )
 
-            # Process data for additional functionality.
             processed_events = process_outages(result_rows)
             if processed_events:
                 processed_df = pd.DataFrame(processed_events)
@@ -339,4 +316,3 @@ with st.container():
                 st.info("No processed outage events meet the criteria for being truly out of supply.")
         else:
             st.error("Please provide data in all text areas.")
-st.markdown("</div>", unsafe_allow_html=True)
