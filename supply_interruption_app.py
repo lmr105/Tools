@@ -189,11 +189,11 @@ def compute_quick_table(pressure_df, logger_height, additional_headloss, unique_
     """
     Computes a quick supply status table.
     For each property height, determines if it is in supply at the last timestamp.
-    If out of supply, calculates how long it has been out.
+    If out of supply, calculates how long it has been out based on the most recent in-supply timestamp.
     Also computes CML Impact using the formula:
        ((Outage Duration in hours * Total Properties) / 1473786)*60.
     Returns a DataFrame with columns: 
-      Property Height (m), Total Properties, Supply Status, Outage Duration, CML Impact.
+      Property Height (m), Total Properties, Supply Status, Outage Duration, and CML Impact.
     """
     modified_pressure = pressure_df['Pressure'] - additional_headloss
     effective_supply_head = logger_height + (modified_pressure - 3)
@@ -206,16 +206,18 @@ def compute_quick_table(pressure_df, logger_height, additional_headloss, unique_
             condition = modified_pressure > 0
         else:
             condition = effective_supply_head > h
-        last_status = condition.iloc[-1]
-        if last_status:
+        
+        # Instead of simply taking the last value, search backwards for the most recent True.
+        if condition.iloc[-1]:
             supply_status = "In Supply"
-            outage_duration = None
             outage_duration_str = ""
             cml_impact = 0
         else:
-            true_indices = condition[condition].index
+            # Reverse the condition series.
+            reversed_condition = condition[::-1]
+            true_indices = reversed_condition[reversed_condition].index
             if not true_indices.empty:
-                last_in_supply = pressure_df['Datetime'].loc[true_indices[-1]]
+                last_in_supply = pressure_df['Datetime'].loc[true_indices[0]]
                 outage_duration = last_time - last_in_supply
             else:
                 outage_duration = last_time - first_time
@@ -255,12 +257,12 @@ st.markdown(
 
 # Centered, resized logo.
 st.markdown(
-    "<div style='text-align: center;'><img src='https://www.dwrcymru.com/-/media/project/images/brand/logo/dcww-logo-colour-x2.ashx?h=36&w=140&la=en&hash=1FC5F218FEA70D80F68EA05374493D16' width='400'></div>",
+    "<div style='text-align: center;'><img src='https://via.placeholder.com/800x150.png?text=Water+Supply+Interruption+Calculator' width='400'></div>",
     unsafe_allow_html=True
 )
 
 with st.container():
-    st.title("Supply Interruption Analysis")
+    st.title("Review Mode - Supply Interruption Analysis")
     st.markdown("""
     **Instructions:**
 
@@ -338,9 +340,8 @@ with st.container():
                     for i, intr in enumerate(interruptions):
                         if intr['duration'] is None:
                             continue
-                        # Store duration as timedelta for further processing.
                         duration_td = intr['duration']
-                        formatted_duration = format_timedelta(duration_td)
+                        # Store the raw duration as a timedelta for further processing.
                         if i > 0:
                             restoration_td = intr['lost_time'] - interruptions[i-1]['regained_time']
                             formatted_restoration = format_timedelta(restoration_td)
@@ -415,6 +416,6 @@ with st.container():
             st.markdown("### Quick Supply Status Table")
             st.dataframe(quick_df)
             total_impact = quick_df['CML Impact'].sum()
-            st.markdown(f"**Total Impact: {total_impact:.6f}**")
+            st.markdown(f"**Total Impact: {total_impact:.4f}**")
         else:
             st.error("Please provide data in all text areas.")
