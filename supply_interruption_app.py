@@ -416,6 +416,6 @@ with st.container():
             st.markdown("### Quick Supply Status Table")
             st.dataframe(quick_df)
             total_impact = quick_df['CML Impact'].sum()
-            st.markdown(f"**Total Impact: {total_impact:.4f}**")
+            st.markdown(f"**Total Impact: {total_impact:.6f}**")
         else:
             st.error("Please provide data in all text areas.")
