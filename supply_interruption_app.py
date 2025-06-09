@@ -115,13 +115,16 @@ def generate_excel_file(results_df):
     df_excel = df_excel.drop(columns=["Raw Duration"])
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        # Write raw results
         df_excel.to_excel(writer, index=False, sheet_name='Results')
         workbook = writer.book
         worksheet = writer.sheets['Results']
         num_rows = df_excel.shape[0] + 1
         num_cols = df_excel.shape[1]
         raw_col_index = df_excel.columns.get_loc("Raw Duration (seconds)")
+        # Hide the Raw Duration (seconds) column
         worksheet.set_column(raw_col_index, raw_col_index, None, None, {'hidden': True})
+        # Apply conditional highlighting for outages >= 3 hours
         highlight_format = workbook.add_format({'bg_color': '#FFFF00'})
         raw_col_letter = xl_col_to_name(raw_col_index)
         visible_range = f"A2:{xl_col_to_name(num_cols - 1)}{num_rows}"
@@ -143,9 +146,9 @@ def generate_processed_excel_file(processed_df):
     """
     def calc_cml(row):
         hours = row['Outage Duration (raw)'].total_seconds() / 3600
-        return ((hours * row['Total Properties']) / 1473786) * 60
+        return ((hours * row['Total Properties']) / 1480502) * 60
     processed_df['CML Impact'] = processed_df.apply(lambda row: calc_cml(row) if pd.notnull(row['Outage Duration (raw)']) else 0, axis=1)
-    processed_df['Cost'] = processed_df['CML Impact'] * 61000
+    processed_df['Cost'] = (processed_df['CML Impact'] * 660000).round(2)
     processed_df['Outage Duration'] = processed_df['Outage Duration (raw)'].apply(
         lambda x: format_timedelta(x) if pd.notnull(x) and isinstance(x, timedelta) else "")
     processed_df = processed_df.drop(columns=["Outage Duration (raw)"])
@@ -333,6 +336,7 @@ def compute_quick_table(pressure_df, logger_height, additional_headloss, unique_
 # --------------------
 # Main UI & Processing (Review Mode)
 # --------------------
+# --------------------
 st.markdown("## Supply Interruption Analysis")
 st.markdown("""
 **Instructions:**
@@ -344,8 +348,9 @@ st.markdown("""
 2. **Property Heights:**
    - Copy the column of property heights and paste it into the **Property Heights** box.
 3. Enter the height of the pressure logger.
-4. Enter the simulated additional headloss (in meters) to deduct from the pressure readings.
-5. Click **Run Analysis** for full downloadable results or **Quick Table** for a quick reactive overview.
+4. If required, enter the simulated additional headloss (in meters) to deduct from the pressure readings.
+5. If required, toggle **'Apply BST Adjustment'** to add an hour to timestamps during BST. 
+6. Click **Run Analysis**.
 """)
 
 col1, col2, col3 = st.columns(3)
@@ -359,12 +364,15 @@ with col3:
 logger_height = st.number_input("Enter the height of the pressure logger (in meters):", min_value=0.0, value=100.0)
 additional_headloss = st.number_input("Simulate additional headloss (in meters):", min_value=0.0, value=0.0, step=0.1)
 
+# BST Toggle: apply 1-hour shift to output times
+apply_bst = st.checkbox("Apply BST Adjustment (GMT+1)", value=False)
+
 # Buttons placed side by side.
 col_buttons = st.columns(2)
 with col_buttons[0]:
     run_analysis_clicked = st.button("Run Analysis")
-with col_buttons[1]:
-    quick_table_clicked = st.button("Quick Table")
+# with col_buttons[1]:
+#     quick_table_clicked = st.button("Quick Table")
 
 if run_analysis_clicked:
     if pressure_timestamps_text and pressure_readings_text and property_heights_text:
@@ -436,6 +444,11 @@ if run_analysis_clicked:
         results_df = pd.DataFrame(result_rows)
         # Format the Outage Duration as string.
         results_df['Outage Duration'] = results_df['Outage Duration'].apply(lambda x: format_timedelta(x) if pd.notnull(x) and isinstance(x, timedelta) else x)
+        # Apply BST adjustment if selected
+        if apply_bst:
+            # Shift lost and regained supply times by 1 hour
+            results_df['Lost Supply'] = results_df['Lost Supply'] + timedelta(hours=1)
+            results_df['Regained Supply'] = results_df['Regained Supply'].apply(lambda x: x + timedelta(hours=1) if isinstance(x, datetime) else x)
         raw_excel = generate_excel_file(results_df)
         st.download_button(
             label="Download Raw Data as Excel (.xlsx)",
@@ -447,6 +460,10 @@ if run_analysis_clicked:
         if processed_events:
             processed_df = pd.DataFrame(processed_events)
             processed_df = processed_df.sort_values(by="Property Height (m)", ascending=False)
+            # Apply BST adjustment if selected
+            if apply_bst:
+                processed_df['Lost Supply'] = processed_df['Lost Supply'] + timedelta(hours=1)
+                processed_df['Regained Supply'] = processed_df['Regained Supply'] + timedelta(hours=1)
             processed_excel_data = generate_processed_excel_file(processed_df)
             st.download_button(
                 label="Download Processed Data as Excel (.xlsx)",
@@ -459,40 +476,41 @@ if run_analysis_clicked:
     else:
         st.error("Please provide data in all text areas.")
 
-if quick_table_clicked:
-    if pressure_timestamps_text and pressure_readings_text and property_heights_text:
-        timestamps_list = [line.strip() for line in pressure_timestamps_text.splitlines() if line.strip()]
-        pressure_list = [line.strip() for line in pressure_readings_text.splitlines() if line.strip()]
-        heights_list = [line.strip() for line in property_heights_text.splitlines() if line.strip()]
-        try:
-            pressure_df = pd.DataFrame({
-                'Datetime': [pd.to_datetime(ts, format="%d/%m/%Y %H:%M") for ts in timestamps_list],
-                'Pressure': [float(p) for p in pressure_list]
-            })
-        except Exception as e:
-            st.error(f"Error parsing pressure data: {e}")
-            st.stop()
-        try:
-            heights_df = pd.DataFrame({
-                'Property_Height': [float(h) for h in heights_list]
-            })
-        except Exception as e:
-            st.error(f"Error parsing property heights: {e}")
-            st.stop()
-
-        pressure_df['Modified_Pressure'] = pressure_df['Pressure'] - additional_headloss
-        pressure_df['Effective_Supply_Head'] = logger_height + (pressure_df['Modified_Pressure'] - 3)
-        grouped = heights_df.groupby('Property_Height').size().reset_index(name='Total Properties')
-        total_props = dict(zip(grouped['Property_Height'], grouped['Total Properties']))
-        unique_heights = sorted(heights_df['Property_Height'].unique())
-        
-        quick_df = compute_quick_table(pressure_df, logger_height, additional_headloss, unique_heights, total_props)
-        st.markdown("### Quick Supply Status Table")
-        st.dataframe(quick_df)
-        total_impact = quick_df['CML Impact'].sum()
-        st.markdown(f"**Total Impact: {total_impact:.6f}**")
-        total_duration_hours = (pressure_df['Datetime'].iloc[-1] - pressure_df['Datetime'].iloc[0]).total_seconds() / 3600
-        cml_hr = total_impact / total_duration_hours if total_duration_hours > 0 else 0
-        st.markdown(f"**CML/hr: {cml_hr:.6f}**")
-    else:
-        st.error("Please provide data in all text areas.")
+# Quick Table is currently disabled
+# if quick_table_clicked:
+#     if pressure_timestamps_text and pressure_readings_text and property_heights_text:
+#         timestamps_list = [line.strip() for line in pressure_timestamps_text.splitlines() if line.strip()]
+#         pressure_list = [line.strip() for line in pressure_readings_text.splitlines() if line.strip()]
+#         heights_list = [line.strip() for line in property_heights_text.splitlines() if line.strip()]
+#         try:
+#             pressure_df = pd.DataFrame({
+#                 'Datetime': [pd.to_datetime(ts, format="%d/%m/%Y %H:%M") for ts in timestamps_list],
+#                 'Pressure': [float(p) for p in pressure_list]
+#             })
+#         except Exception as e:
+#             st.error(f"Error parsing pressure data: {e}")
+#             st.stop()
+#         try:
+#             heights_df = pd.DataFrame({
+#                 'Property_Height': [float(h) for h in heights_list]
+#             })
+#         except Exception as e:
+#             st.error(f"Error parsing property heights: {e}")
+#             st.stop()
+#
+#         pressure_df['Modified_Pressure'] = pressure_df['Pressure'] - additional_headloss
+#         pressure_df['Effective_Supply_Head'] = logger_height + (pressure_df['Modified_Pressure'] - 3)
+#         grouped = heights_df.groupby('Property_Height').size().reset_index(name='Total Properties')
+#         total_props = dict(zip(grouped['Property_Height'], grouped['Total Properties']))
+#         unique_heights = sorted(heights_df['Property_Height'].unique())
+#         
+#         quick_df = compute_quick_table(pressure_df, logger_height, additional_headloss, unique_heights, total_props)
+#         st.markdown("### Quick Supply Status Table")
+#         st.dataframe(quick_df)
+#         total_impact = quick_df['CML Impact'].sum()
+#         st.markdown(f"**Total Impact: {total_impact:.6f}**")
+#         total_duration_hours = (pressure_df['Datetime'].iloc[-1] - pressure_df['Datetime'].iloc[0]).total_seconds() / 3600
+#         cml_hr = total_impact / total_duration_hours if total_duration_hours > 0 else 0
+#         st.markdown(f"**CML/hr: {cml_hr:.6f}**")
+#     else:
+#         st.error("Please provide data in all text areas.")
