@@ -446,9 +446,14 @@ if run_analysis_clicked:
         results_df['Outage Duration'] = results_df['Outage Duration'].apply(lambda x: format_timedelta(x) if pd.notnull(x) and isinstance(x, timedelta) else x)
         # Apply BST adjustment if selected
         if apply_bst:
-            # Shift lost and regained supply times by 1 hour
-            results_df['Lost Supply'] = results_df['Lost Supply'] + timedelta(hours=1)
-            results_df['Regained Supply'] = results_df['Regained Supply'].apply(lambda x: x + timedelta(hours=1) if isinstance(x, datetime) else x)
+                shift = timedelta(hours=1)
+                def try_shift(val):
+                    # only shift if this is a real datetime
+                    if isinstance(val, (pd.Timestamp, datetime)):
+                        return val + shift
+                    return val
+                results_df['Lost Supply']    = results_df['Lost Supply'].apply(try_shift)
+                results_df['Regained Supply'] = results_df['Regained Supply'].apply(try_shift)
         raw_excel = generate_excel_file(results_df)
         st.download_button(
             label="Download Raw Data as Excel (.xlsx)",
